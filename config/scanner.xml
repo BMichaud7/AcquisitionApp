@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SDR Acquisition — Spectrum Scanner Configuration
+  ─────────────────────────────────────────────────────────────────────────
+  The acquisition binary is a CLIENT of the sdr_controller (task manager).
+  It submits a SCAN task via AMQP and receives CF32 IQ data over UDP.
+  It does NOT open SoapySDR directly.
+
+  Build:  cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+  Run:    ./build/sdr_acquisition config/scanner.xml
+  DB:     psql -U sdr -d sdr_scanner -f schema/init.sql   (run once first)
+-->
+<sdr_acquisition version="2.0">
+
+  <!-- Unique name for this scanner instance — appears in DB and AMQP messages -->
+  <scanner_id>scanner-0</scanner_id>
+
+  <!-- ── AMQP broker ────────────────────────────────────────────────────── -->
+  <!-- Same broker used by the sdr_controller.
+       detection_topic: where this scanner publishes RF detection events.
+       task_request_queue / task_response_queue: controller's RRTM queues. -->
+  <amqp>
+    <url>amqp://localhost:5672</url>
+    <username>scanner</username>
+    <password>CHANGE_ME</password>
+    <detection_topic>rf.detections</detection_topic>
+    <task_request_queue>sdr.task.request</task_request_queue>
+    <task_response_queue>sdr.task.response</task_response_queue>
+    <reconnect_interval_sec>5</reconnect_interval_sec>
+  </amqp>
+
+  <!-- ── PostgreSQL ────────────────────────────────────────────────────── -->
+  <database>
+    <host>localhost</host>
+    <port>5432</port>
+    <name>sdr_scanner</name>
+    <user>sdr</user>
+    <password>CHANGE_ME</password>
+  </database>
+
+  <!-- ── RF parameters requested from the controller ───────────────────── -->
+  <!-- The controller allocates a physical device and channels.
+       This block describes what the acquisition needs, not which hardware. -->
+  <device>
+    <rx_channels>1</rx_channels>
+    <sample_rate_sps>10000000</sample_rate_sps>  <!-- 10 MSPS -->
+    <rx_gain_db>40</rx_gain_db>
+    <bandwidth_hz>10000000</bandwidth_hz>
+  </device>
+
+  <!-- ── Sweep parameters ───────────────────────────────────────────────── -->
+  <sweep>
+    <start_hz>70000000</start_hz>       <!-- 70 MHz -->
+    <stop_hz>1000000000</stop_hz>       <!-- 1 GHz  -->
+    <dwell_samples>4096</dwell_samples>
+    <fft_size>4096</fft_size>
+    <usable_bw_fraction>0.80</usable_bw_fraction>
+    <threshold_db>10.0</threshold_db>
+    <min_signal_bw_hz>2500</min_signal_bw_hz>
+    <settle_samples>512</settle_samples>
+  </sweep>
+
+  <!-- ── UDP IQ receiver ────────────────────────────────────────────────── -->
+  <!-- local_ip: IP the acquisition binds to receive IQ data from the
+       controller.  Must be routable FROM the controller host.
+       Set to the acquisition host's IP (not 0.0.0.0) when controller and
+       acquisition run on different machines.
+       port: 0 = OS-assigned (recommended); set a fixed value if a firewall
+       rule is required. -->
+  <receiver>
+    <local_ip>127.0.0.1</local_ip>
+    <port>0</port>
+  </receiver>
+
+</sdr_acquisition>

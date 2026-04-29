@@ -1,0 +1,96 @@
+# ============================================================================
+#  AcquisitionApp — Unit Test Container  (CentOS Stream 10)
+#
+#  Builds and runs the acquisition unit test suite (FFT processor, sweep
+#  config, spectrum scanner).  No broker, database, or SDR hardware required.
+#
+#  SoapySDR is only needed by the test binary (FakeAcqSoapyDevice).
+#  The production binary (sdr_acquisition) is skipped — PROTON and PQXX
+#  are intentionally absent so CMake skips that target.
+#
+#  Build context: parent directory (contains both SdrTaskApi/ and
+#  AcquisitionApp/).
+#
+#  Build (from parent directory):
+#    podman build -f AcquisitionApp/Containerfile.test \
+#                 -t sdr-acquisition:test .
+#
+#  Run (exits 0 on pass):
+#    podman run --rm sdr-acquisition:test
+#
+#  Verbose:
+#    podman run --rm sdr-acquisition:test ctest --output-on-failure -V
+# ============================================================================
+
+FROM quay.io/centos/centos:stream10
+
+LABEL maintainer="SDR RF Systems"
+LABEL description="AcquisitionApp — CentOS Stream 10 unit test image"
+
+ENV HOME=/root
+WORKDIR /root
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 1 — Enable EPEL + CRB, install system packages
+# ─────────────────────────────────────────────────────────────────────────────
+RUN dnf install -y epel-release && \
+    dnf config-manager --enable crb && \
+    dnf update -y && \
+    dnf install -y \
+        gcc gcc-c++ make cmake ninja-build pkg-config \
+        git wget curl ca-certificates \
+        fftw-devel \
+        tinyxml2-devel \
+        fmt-devel \
+    && dnf clean all
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 2 — Build spdlog 1.13.0 from source (with external fmt)
+# ─────────────────────────────────────────────────────────────────────────────
+RUN git clone --depth 1 --branch v1.13.0 \
+        https://github.com/gabime/spdlog.git /tmp/spdlog && \
+    cmake -S /tmp/spdlog -B /tmp/spdlog/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DSPDLOG_FMT_EXTERNAL=ON \
+        -DSPDLOG_BUILD_SHARED=OFF && \
+    cmake --build /tmp/spdlog/build --parallel "$(nproc)" --target spdlog && \
+    cmake --install /tmp/spdlog/build && \
+    rm -rf /tmp/spdlog
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 3 — Build SoapySDR 0.8.1 from source
+#  Only the TEST binary uses SoapySDR (FakeAcqSoapyDevice).
+# ─────────────────────────────────────────────────────────────────────────────
+RUN git clone --depth 1 --branch soapy-sdr-0.8.1 \
+        https://github.com/pothosware/SoapySDR.git /tmp/SoapySDR && \
+    cmake -S /tmp/SoapySDR -B /tmp/SoapySDR/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DENABLE_PYTHON=OFF \
+        -DENABLE_PYTHON3=OFF && \
+    cmake --build /tmp/SoapySDR/build --parallel "$(nproc)" && \
+    cmake --install /tmp/SoapySDR/build && \
+    rm -rf /tmp/SoapySDR
+
+RUN echo /usr/local/lib64 > /etc/ld.so.conf.d/local.conf && ldconfig
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 4 — Copy both sibling repos, then build
+#  SdrTaskApi is placed at ../SdrTaskApi relative to AcquisitionApp so
+#  the CMakeLists add_subdirectory(../SdrTaskApi ...) resolves correctly.
+#  nlohmann/json and GTest are fetched from GitHub during cmake configure.
+# ─────────────────────────────────────────────────────────────────────────────
+COPY SdrTaskApi/    /build/SdrTaskApi/
+COPY AcquisitionApp/ /build/AcquisitionApp/
+
+RUN cmake -S /build/AcquisitionApp -B /build/AcquisitionApp/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH=/usr/local \
+        -DSoapySDR_DIR=/usr/local/lib64/cmake/SoapySDR \
+    && cmake --build /build/AcquisitionApp/build --parallel "$(nproc)"
+
+ENV LD_LIBRARY_PATH="/usr/local/lib64:/usr/local/lib"
+WORKDIR /build/AcquisitionApp/build
+
+CMD ["ctest", "--output-on-failure", "-V"]
