@@ -132,10 +132,24 @@ podman run --rm sdr-acq:test                                   # exits 0 on pass
 podman run --rm sdr-acq:test ctest --output-on-failure -V      # verbose
 ```
 
-**Native build:**
+**Native build (using the included build script):**
 
 ```bash
-# Clone sibling repos first
+git clone https://github.com/BMichaud7/AcquisitionApp.git
+cd AcquisitionApp
+
+./build.sh             # Release build — clones SdrTaskApi automatically
+./build.sh --tests     # Release build + run all 48 unit tests
+./build.sh --debug     # Debug build (AddressSanitizer + UBSan)
+./build.sh --clean     # Wipe build/ and rebuild from scratch
+./build.sh --no-clone  # Skip git-clone (SdrTaskApi already present)
+./build.sh --help      # All options
+```
+
+Or directly with CMake:
+
+```bash
+# Clone SdrTaskApi sibling first
 git clone https://github.com/BMichaud7/SdrTaskApi.git ../SdrTaskApi
 
 cmake -B build -DCMAKE_BUILD_TYPE=Release
