@@ -10,37 +10,96 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_link_options(-fsanitize=address,undefined)
 endif()
 
+# ── PkgConfig ─────────────────────────────────────────────────────────────────
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 
-# ── SdrTaskApi (shared task types + codec — sibling repo) ────────────────────
+# ── SdrTaskApi ────────────────────────────────────────────────────────────────
+# Expected as a sibling directory: ../SdrTaskApi  (same parent as this repo).
+# Falls back to a system-installed cmake package.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../SdrTaskApi/CMakeLists.txt")
+    message(STATUS "SdrTaskApi: using sibling source at ../SdrTaskApi")
     add_subdirectory(../SdrTaskApi ${CMAKE_BINARY_DIR}/SdrTaskApi)
 else()
-    find_package(sdr_task_api REQUIRED)
+    find_package(sdr_task_api QUIET)
+    if(NOT sdr_task_api_FOUND)
+        message(FATAL_ERROR
+            "\n[AcquisitionApp] SdrTaskApi not found.\n"
+            "  Option 1 — clone as a sibling directory (recommended):\n"
+            "    git clone https://github.com/BMichaud7/SdrTaskApi.git "
+            "$(dirname $(pwd))/SdrTaskApi\n"
+            "  Option 2 — install system-wide and set sdr_task_api_DIR.\n"
+            "  Both repos must share the same parent directory for "
+            "the sibling path to resolve automatically.\n")
+    endif()
+    message(STATUS "SdrTaskApi: using installed package ${sdr_task_api_VERSION}")
 endif()
 
-# ── Required for all targets (production binary + tests) ──────────────────────
-pkg_check_modules(TINYXML2 REQUIRED IMPORTED_TARGET tinyxml2)
-pkg_check_modules(FFTW3F   REQUIRED IMPORTED_TARGET fftw3f)
-pkg_check_modules(FMT      REQUIRED IMPORTED_TARGET fmt)
+# ── TinyXML2 ─────────────────────────────────────────────────────────────────
+pkg_check_modules(TINYXML2 QUIET IMPORTED_TARGET tinyxml2)
+if(NOT TINYXML2_FOUND)
+    message(FATAL_ERROR
+        "\n[AcquisitionApp] tinyxml2 not found.\n"
+        "  Ubuntu/Debian : sudo apt-get install libtinyxml2-dev\n"
+        "  CentOS/RHEL   : sudo dnf install tinyxml2-devel\n")
+endif()
 
-# spdlog: prefer cmake package (built from source), fall back to pkg-config
+# ── FFTW3 single-precision ────────────────────────────────────────────────────
+pkg_check_modules(FFTW3F QUIET IMPORTED_TARGET fftw3f)
+if(NOT FFTW3F_FOUND)
+    message(FATAL_ERROR
+        "\n[AcquisitionApp] FFTW3 (single-precision) not found.\n"
+        "  Ubuntu/Debian : sudo apt-get install libfftw3-dev\n"
+        "  CentOS/RHEL   : sudo dnf install fftw-devel\n")
+endif()
+
+# ── fmt ───────────────────────────────────────────────────────────────────────
+pkg_check_modules(FMT QUIET IMPORTED_TARGET fmt)
+if(NOT FMT_FOUND)
+    message(FATAL_ERROR
+        "\n[AcquisitionApp] {fmt} not found.\n"
+        "  Ubuntu/Debian : sudo apt-get install libfmt-dev\n"
+        "  CentOS/RHEL   : sudo dnf install fmt-devel\n")
+endif()
+
+# ── spdlog ────────────────────────────────────────────────────────────────────
 find_package(spdlog QUIET)
 if(NOT spdlog_FOUND)
-    pkg_check_modules(SPDLOG REQUIRED IMPORTED_TARGET spdlog)
+    pkg_check_modules(SPDLOG QUIET IMPORTED_TARGET spdlog)
+    if(NOT SPDLOG_FOUND)
+        message(FATAL_ERROR
+            "\n[AcquisitionApp] spdlog not found.\n"
+            "  Ubuntu/Debian : sudo apt-get install libspdlog-dev\n"
+            "  CentOS/RHEL   : build from source — see Containerfile.test\n")
+    endif()
     add_library(spdlog::spdlog INTERFACE IMPORTED)
     target_include_directories(spdlog::spdlog INTERFACE ${SPDLOG_INCLUDE_DIRS})
     target_link_libraries(spdlog::spdlog INTERFACE ${SPDLOG_LIBRARIES})
     target_compile_definitions(spdlog::spdlog INTERFACE SPDLOG_FMT_EXTERNAL)
 endif()
 
-# ── Required only for the production binary ───────────────────────────────────
-# SoapySDR is intentionally absent here — it belongs in the test binary only.
+# ── Optional — production binary only ─────────────────────────────────────────
+# qpid-proton and libpqxx are only needed for the production binary
+# (sdr_acquisition). The unit tests compile and run without them.
 pkg_check_modules(PROTON QUIET IMPORTED_TARGET qpid-proton-cpp)
-pkg_check_modules(PQXX   QUIET IMPORTED_TARGET libpqxx)
+if(NOT PROTON_FOUND)
+    message(STATUS
+        "[AcquisitionApp] qpid-proton-cpp not found — "
+        "sdr_acquisition binary will be skipped.\n"
+        "  Ubuntu/Debian: sudo apt-get install libqpid-proton-cpp12-dev\n"
+        "  CentOS/RHEL  : sudo dnf install qpid-proton-cpp-devel")
+endif()
 
-# ── Production binary (requires PROTON + PQXX) ───────────────────────────────
+pkg_check_modules(PQXX QUIET IMPORTED_TARGET libpqxx)
+if(NOT PQXX_FOUND)
+    message(STATUS
+        "[AcquisitionApp] libpqxx not found — "
+        "sdr_acquisition binary will be skipped.\n"
+        "  Ubuntu/Debian: sudo apt-get install libpqxx-dev\n"
+        "  CentOS/RHEL  : sudo dnf install libpqxx-devel")
+endif()
+
+# ── Production binary (requires PROTON + PQXX) ────────────────────────────────
 if(PROTON_FOUND AND PQXX_FOUND)
     add_executable(sdr_acquisition
         src/main.cpp
@@ -68,7 +127,8 @@ if(PROTON_FOUND AND PQXX_FOUND)
     )
     install(TARGETS sdr_acquisition DESTINATION bin)
 else()
-    message(STATUS "sdr_acquisition binary skipped "
+    message(STATUS
+        "[AcquisitionApp] sdr_acquisition binary skipped "
         "(PROTON_FOUND=${PROTON_FOUND}, PQXX_FOUND=${PQXX_FOUND})")
 endif()
 
@@ -81,3 +141,30 @@ install(FILES config/scanner.xml
     DESTINATION etc/sdr-acquisition
     RENAME scanner.xml.example)
 install(FILES schema/init.sql DESTINATION share/sdr-acquisition)
+
+# ── Configure summary ─────────────────────────────────────────────────────────
+message(STATUS "")
+message(STATUS "┌─ AcquisitionApp ${PROJECT_VERSION} ─────────────────────────────────┐")
+message(STATUS "│  C++ standard : C++20                                     │")
+message(STATUS "│  Build type   : ${CMAKE_BUILD_TYPE}                              ")
+message(STATUS "│  Dependencies (required for all targets):                 │")
+message(STATUS "│    SdrTaskApi    : FOUND (sibling or installed)           │")
+message(STATUS "│    tinyxml2      : FOUND ${TINYXML2_VERSION}                       ")
+message(STATUS "│    fftw3f        : FOUND ${FFTW3F_VERSION}                         ")
+message(STATUS "│    fmt           : FOUND ${FMT_VERSION}                            ")
+message(STATUS "│    spdlog        : FOUND                                  │")
+message(STATUS "│    SoapySDR      : test-only (required by acq_tests)      │")
+message(STATUS "│    googletest    : test-only (system or FetchContent)     │")
+message(STATUS "│  Dependencies (required for sdr_acquisition binary only): │")
+if(PROTON_FOUND)
+    message(STATUS "│    qpid-proton   : FOUND ${PROTON_VERSION}                      ")
+else()
+    message(STATUS "│    qpid-proton   : NOT FOUND — binary skipped            │")
+endif()
+if(PQXX_FOUND)
+    message(STATUS "│    libpqxx       : FOUND ${PQXX_VERSION}                        ")
+else()
+    message(STATUS "│    libpqxx       : NOT FOUND — binary skipped            │")
+endif()
+message(STATUS "└───────────────────────────────────────────────────────────┘")
+message(STATUS "")

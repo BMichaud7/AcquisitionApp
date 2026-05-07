@@ -75,18 +75,78 @@ FftProcessor ──► Detection callback ──► AMQP rf.detections topic
 | `min_signal_bw_hz` | Minimum contiguous bandwidth for a detection to be reported |
 | `settle_samples` | Samples discarded after each retune before collecting dwell |
 
-## Building
+## Dependencies
+
+AcquisitionApp depends on [SdrTaskApi](https://github.com/BMichaud7/SdrTaskApi)
+for the shared type system and AMQP message codec. All three repos must share the
+same parent directory for CMake to detect SdrTaskApi automatically:
+
+```
+parent/
+├── SdrTaskApi/           ← https://github.com/BMichaud7/SdrTaskApi   (required)
+├── SdrResourceManager/   ← https://github.com/BMichaud7/SdrResourceManager
+└── AcquisitionApp/       ← this repo
+```
+
+If SdrTaskApi is not found as a sibling, CMake falls back to an installed
+`sdr_task_api` package and fails with a helpful message if neither is available.
+
+### Dependency table
+
+| Package | Required for | Notes |
+|---------|-------------|-------|
+| `SdrTaskApi` | All | Sibling dir or installed package |
+| `libtinyxml2-dev` | All | Config file parser |
+| `libfftw3-dev` | All | FFT-based signal detection |
+| `libfmt-dev` | All | Logging formatting |
+| `libspdlog-dev` | All | Structured logging |
+| `libsoapysdr-dev` | Unit tests | `FakeAcqSoapyDevice` in test binary |
+| `googletest` | Unit tests | Auto-fetched via FetchContent |
+| `libqpid-proton-cpp12-dev` | `sdr_acquisition` binary only | AMQP broker connection |
+| `libpqxx-dev` | `sdr_acquisition` binary only | PostgreSQL detection DB |
+
+CMake prints a `FATAL_ERROR` with the exact install command for any missing
+required dependency. The `sdr_acquisition` binary is silently skipped (with a
+`STATUS` message) when qpid-proton or libpqxx are not found.
 
 ```bash
-# Unit tests (CentOS 10 container, no hardware or broker needed)
-podman build -f Containerfile.test -t sdr-acq:test .
-podman run --rm sdr-acq:test          # exits 0 on pass
-podman run --rm sdr-acq:test /build/AcquisitionApp/build/tests/acq_tests --gtest_filter='*' -V
+# Ubuntu 24.04 — unit tests + production binary
+apt-get install -y \
+    build-essential cmake pkg-config git \
+    libtinyxml2-dev libfftw3-dev libfmt-dev libspdlog-dev \
+    libsoapysdr-dev soapysdr-module-remote \
+    libqpid-proton-cpp12-dev \
+    libpqxx-dev
+
+# CentOS Stream 10 — see Containerfile.test for exact build-from-source steps
+```
+
+## Building
+
+**Unit tests (container — no hardware or broker needed):**
+
+```bash
+# Must be run from the parent directory so COPY SdrTaskApi/ works
+podman build -f AcquisitionApp/Containerfile.test -t sdr-acq:test .
+podman run --rm sdr-acq:test                                   # exits 0 on pass
+podman run --rm sdr-acq:test ctest --output-on-failure -V      # verbose
+```
+
+**Native build:**
+
+```bash
+# Clone sibling repos first
+git clone https://github.com/BMichaud7/SdrTaskApi.git ../SdrTaskApi
+
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel $(nproc)
+ctest --test-dir build --output-on-failure
 ```
 
 Test suite covers 48 cases across `FftProcessor`, `SpectrumScanner`, and `SweepConfig`.
 
-The production binary (`sdr_acquisition`) requires qpid-proton and libpqxx (PostgreSQL) and is built inside the full stack image, not the test container.
+The production binary (`sdr_acquisition`) requires qpid-proton and libpqxx (PostgreSQL)
+and is skipped automatically at configure time if those packages are absent.
 
 ## Detection output
 
