@@ -12,7 +12,7 @@ SpectrumScanner::SpectrumScanner(SweepConfig cfg, IqSource* source, DetectionCal
     : cfg_(std::move(cfg)), source_(source), cb_(std::move(cb))
 {
     for (int i = 0; i < cfg_.device.rx_channels; ++i)
-        processors_.emplace_back(cfg_.sweep.fft_size);
+        processors_.push_back(std::make_unique<FftProcessor>(cfg_.sweep.fft_size));
 }
 
 SpectrumScanner::~SpectrumScanner() { stop(); }
@@ -69,7 +69,7 @@ std::vector<Detection> SpectrumScanner::processDwell(
     int ch, uint64_t center_hz,
     const std::vector<std::complex<float>>& samples)
 {
-    auto& proc = processors_[ch];
+    auto& proc = *processors_[ch];
     auto  sigs = proc.detect(
         samples.data(),
         static_cast<float>(cfg_.sweep.threshold_db),
@@ -81,9 +81,9 @@ std::vector<Detection> SpectrumScanner::processDwell(
     std::vector<Detection> out;
     out.reserve(sigs.size());
     for (const auto& s : sigs) {
-        uint64_t f_lo = proc.binToHz(s.start_bin, cfg_.device.sample_rate, center_hz);
-        uint64_t f_hi = proc.binToHz(s.end_bin,   cfg_.device.sample_rate, center_hz);
-        uint64_t fc   = proc.binToHz((s.start_bin + s.end_bin) / 2,
+        uint64_t f_lo = processors_[ch]->binToHz(s.start_bin, cfg_.device.sample_rate, center_hz);
+        uint64_t f_hi = processors_[ch]->binToHz(s.end_bin,   cfg_.device.sample_rate, center_hz);
+        uint64_t fc   = processors_[ch]->binToHz((s.start_bin + s.end_bin) / 2,
                                       cfg_.device.sample_rate, center_hz);
         Detection d;
         d.timestamp      = now;

@@ -50,6 +50,7 @@ struct ReceiverConfig {
 
 struct SweepConfig {
     std::string    scanner_id{"scanner-0"};
+    int            rank{0};
     AmqpConfig     amqp;
     DbConfig       db;
     DeviceConfig   device;

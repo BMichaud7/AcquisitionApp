@@ -22,11 +22,11 @@ static SweepConfig makeTestConfig(bool shared_lo = false, int rx_channels = 1) {
     cfg.device.rx_gain_db         = 40.0;
     cfg.device.bandwidth_hz       = 10e6;
     cfg.sweep.start_hz            = 100'000'000;   // 100 MHz
-    cfg.sweep.stop_hz             = 110'000'000;   // 110 MHz — one dwell step
+    cfg.sweep.stop_hz             = 108'000'000;   // 108 MHz — exactly one dwell step (step = sr*usable = 8 MHz)
     cfg.sweep.dwell_samples       = 256;
     cfg.sweep.fft_size            = 256;
     cfg.sweep.usable_bw_fraction  = 0.80;
-    cfg.sweep.threshold_db        = 5.0;
+    cfg.sweep.threshold_db        = 15.0;  // suppress Hann sidelobe fragments while keeping main lobe
     cfg.sweep.min_signal_bw_hz    = 1000;
     cfg.sweep.settle_samples      = 0;
     return cfg;
@@ -136,7 +136,7 @@ TEST_F(SpectrumScannerTest, DetectionHasReasonableMetadata) {
 
     const double fc = static_cast<double>(captured.center_freq_hz);
     EXPECT_GT(fc, 100e6);
-    EXPECT_LT(fc, 110e6);
+    EXPECT_LT(fc, 108e6);
 }
 
 // ── Multi-channel ─────────────────────────────────────────────────────────────
@@ -163,4 +163,67 @@ TEST_F(SpectrumScannerTest, TwoChannels_ToneDetectedOnChannel0) {
     scanner.stop();
 
     EXPECT_TRUE(fired) << "Tone should be detected on channel 0 even with 2 channels open";
+}
+
+// ── Edge cases ────────────────────────────────────────────────────────────────
+
+TEST_F(SpectrumScannerTest, NoDetectionsAfterStop) {
+    FakeAcqSoapy::tone_enabled.store(true);
+    FakeAcqSoapy::tone_freq_frac.store(0.25f);
+    FakeAcqSoapy::tone_amplitude.store(1.0f);
+
+    std::atomic<int> count{0};
+    SoapyIqSource source(makeTestConfig());
+    SpectrumScanner scanner(makeTestConfig(),
+        &source, [&count](const Detection&){ count++; });
+    scanner.start();
+
+    // Wait until at least one detection fires to confirm the scanner is active.
+    waitFor([&]{ return count.load() > 0; }, 500);
+    scanner.stop();
+
+    int snapshot = count.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_EQ(count.load(), snapshot)
+        << "Callback must not fire after stop() returns";
+}
+
+TEST_F(SpectrumScannerTest, ZeroInputNoCallbackFired) {
+    FakeAcqSoapy::tone_enabled.store(false);
+
+    std::atomic<bool> fired{false};
+    SoapyIqSource source(makeTestConfig());
+    SpectrumScanner scanner(makeTestConfig(),
+        &source, [&fired](const Detection&){ fired = true; });
+    scanner.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    scanner.stop();
+
+    EXPECT_FALSE(fired.load()) << "All-zero IQ should never trigger the detection callback";
+}
+
+TEST_F(SpectrumScannerTest, DetectionCenterFreqIsInSweepRange) {
+    FakeAcqSoapy::tone_enabled.store(true);
+    FakeAcqSoapy::tone_freq_frac.store(0.25f);
+    FakeAcqSoapy::tone_amplitude.store(1.0f);
+
+    std::vector<Detection> detections;
+    std::mutex mu;
+    SoapyIqSource source(makeTestConfig());
+    SpectrumScanner scanner(makeTestConfig(), &source,
+        [&](const Detection& d){
+            std::lock_guard lk(mu);
+            detections.push_back(d);
+        });
+    scanner.start();
+    waitFor([&]{ std::lock_guard lk(mu); return !detections.empty(); }, 500);
+    scanner.stop();
+
+    std::lock_guard lk(mu);
+    ASSERT_FALSE(detections.empty());
+    for (const auto& d : detections) {
+        // Allow half-bin margin (~40 kHz) for quantization at FFT bin edges
+        EXPECT_GE(d.center_freq_hz,  99'960'000ULL);
+        EXPECT_LE(d.center_freq_hz, 108'000'000ULL);
+    }
 }

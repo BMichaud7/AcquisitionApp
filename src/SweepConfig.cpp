@@ -40,6 +40,8 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
 
     if (auto* el = opt(root, "scanner_id"))
         cfg.scanner_id = el->GetText() ? el->GetText() : cfg.scanner_id;
+    if (auto* el = opt(root, "rank"))
+        el->QueryIntText(&cfg.rank);
 
     // ── AMQP ────────────────────────────────────────────────────────────────
     if (auto* amqp = opt(root, "amqp")) {

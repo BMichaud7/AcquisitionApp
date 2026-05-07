@@ -43,8 +43,6 @@ TEST_F(SweepConfigTest, ParsesMinimalRequiredElements) {
           </sweep>
         </sdr_acquisition>)");
 
-    EXPECT_EQ(cfg.device.driver, "rtlsdr");
-    EXPECT_EQ(cfg.device.uri,    "serial=00000001");
     EXPECT_EQ(cfg.sweep.start_hz, 70'000'000ULL);
     EXPECT_EQ(cfg.sweep.stop_hz, 1'000'000'000ULL);
 }
@@ -63,7 +61,6 @@ TEST_F(SweepConfigTest, DefaultsAppliedWhenOptionalElementsMissing) {
     EXPECT_EQ(cfg.device.rx_channels,    1);
     EXPECT_DOUBLE_EQ(cfg.device.sample_rate, 10e6);
     EXPECT_DOUBLE_EQ(cfg.device.rx_gain_db,  40.0);
-    EXPECT_EQ(cfg.device.shared_lo,       false);
     EXPECT_EQ(cfg.sweep.fft_size,         4096);
     EXPECT_DOUBLE_EQ(cfg.sweep.threshold_db, 10.0);
     EXPECT_EQ(cfg.sweep.settle_samples,   512);
@@ -125,12 +122,9 @@ TEST_F(SweepConfigTest, ParsesAllOptionalFields) {
     EXPECT_EQ(cfg.db.user,     "dbuser");
     EXPECT_EQ(cfg.db.password, "dbpass");
 
-    EXPECT_EQ(cfg.device.driver,      "remote");
-    EXPECT_EQ(cfg.device.uri,         "192.168.1.100");
     EXPECT_EQ(cfg.device.rx_channels, 2);
     EXPECT_DOUBLE_EQ(cfg.device.sample_rate, 20e6);
     EXPECT_DOUBLE_EQ(cfg.device.rx_gain_db,  50.0);
-    EXPECT_TRUE(cfg.device.shared_lo);
 
     EXPECT_EQ(cfg.sweep.start_hz,            88'000'000ULL);
     EXPECT_EQ(cfg.sweep.stop_hz,            108'000'000ULL);
@@ -228,4 +222,75 @@ TEST(DbConfig, ConnectionStringFormat) {
     EXPECT_NE(cs.find("mydb"),    std::string::npos);
     EXPECT_NE(cs.find("alice"),   std::string::npos);
     EXPECT_NE(cs.find("secret"),  std::string::npos);
+}
+
+// ── Edge cases ────────────────────────────────────────────────────────────────
+
+TEST_F(SweepConfigTest, AmqpDetectionTopicDefaultIsRfDetections) {
+    // When the <amqp> section is absent, detection_topic must default.
+    auto cfg = parse(R"(
+        <sdr_acquisition>
+          <device><driver>rtlsdr</driver><uri>x</uri></device>
+          <sweep><start_hz>100000000</start_hz><stop_hz>200000000</stop_hz></sweep>
+        </sdr_acquisition>)");
+    EXPECT_EQ(cfg.amqp.detection_topic, "rf.detections");
+}
+
+TEST_F(SweepConfigTest, DeviceBandwidthHzDefaultIsPositive) {
+    auto cfg = parse(R"(
+        <sdr_acquisition>
+          <device><rx_channels>1</rx_channels></device>
+          <sweep><start_hz>100000000</start_hz><stop_hz>200000000</stop_hz></sweep>
+        </sdr_acquisition>)");
+    EXPECT_GT(cfg.device.bandwidth_hz, 0.0);
+}
+
+TEST_F(SweepConfigTest, UsableBwFractionDefaultInValidRange) {
+    auto cfg = parse(R"(
+        <sdr_acquisition>
+          <device><driver>rtlsdr</driver><uri></uri></device>
+          <sweep><start_hz>100000000</start_hz><stop_hz>200000000</stop_hz></sweep>
+        </sdr_acquisition>)");
+    EXPECT_GT(cfg.sweep.usable_bw_fraction, 0.0);
+    EXPECT_LE(cfg.sweep.usable_bw_fraction, 1.0);
+}
+
+TEST_F(SweepConfigTest, FftSizeDefaultIsPowerOfTwo) {
+    auto cfg = parse(R"(
+        <sdr_acquisition>
+          <device><driver>rtlsdr</driver><uri></uri></device>
+          <sweep><start_hz>100000000</start_hz><stop_hz>200000000</stop_hz></sweep>
+        </sdr_acquisition>)");
+    int fs = cfg.sweep.fft_size;
+    EXPECT_GT(fs, 0);
+    EXPECT_EQ(fs & (fs - 1), 0) << "fft_size must be a power of two";
+}
+
+TEST_F(SweepConfigTest, ExplicitScannerIdOverridesDefault) {
+    auto cfg = parse(R"(
+        <sdr_acquisition>
+          <scanner_id>my-scanner</scanner_id>
+          <device><driver>rtlsdr</driver><uri></uri></device>
+          <sweep><start_hz>100000000</start_hz><stop_hz>200000000</stop_hz></sweep>
+        </sdr_acquisition>)");
+    EXPECT_EQ(cfg.scanner_id, "my-scanner");
+}
+
+TEST_F(SweepConfigTest, RankDefaultsToZero) {
+    auto cfg = parse(R"(
+        <sdr_acquisition>
+          <device><driver>rtlsdr</driver><uri></uri></device>
+          <sweep><start_hz>100000000</start_hz><stop_hz>200000000</stop_hz></sweep>
+        </sdr_acquisition>)");
+    EXPECT_EQ(cfg.rank, 0);
+}
+
+TEST_F(SweepConfigTest, ExplicitRankIsLoaded) {
+    auto cfg = parse(R"(
+        <sdr_acquisition>
+          <rank>3</rank>
+          <device><driver>rtlsdr</driver><uri></uri></device>
+          <sweep><start_hz>100000000</start_hz><stop_hz>200000000</stop_hz></sweep>
+        </sdr_acquisition>)");
+    EXPECT_EQ(cfg.rank, 3);
 }

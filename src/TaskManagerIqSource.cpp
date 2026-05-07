@@ -177,6 +177,7 @@ std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) con
         {"timestamp_ms",   now_ms},
         {"request_id",     req_id},
         {"task_type",      "SCAN"},
+        {"rank",           cfg_.rank},
         {"schedule", {{"mode", "CONTINUOUS"}}},
         {"rf", {
             {"center_freq_hz",  (cfg_.sweep.start_hz + cfg_.sweep.stop_hz) / 2.0},

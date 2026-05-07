@@ -7,6 +7,7 @@
 #include <thread>
 #include <functional>
 #include <vector>
+#include <memory>
 
 namespace acq {
 
@@ -33,7 +34,7 @@ private:
     IqSource*         source_;
     DetectionCallback cb_;
 
-    std::vector<FftProcessor> processors_;
+    std::vector<std::unique_ptr<FftProcessor>> processors_;
     std::atomic<bool>         running_{false};
     std::thread               thread_;
 
