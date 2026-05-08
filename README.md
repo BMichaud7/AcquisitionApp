@@ -162,6 +162,27 @@ Test suite covers 48 cases across `FftProcessor`, `SpectrumScanner`, and `SweepC
 The production binary (`sdr_acquisition`) requires qpid-proton and libpqxx (PostgreSQL)
 and is skipped automatically at configure time if those packages are absent.
 
+## Combined-window / shared-channel IQ streams
+
+When `SdrResourceManager` accepts two tasks at nearby frequencies on a `shared_lo=true`
+device, it retuning the hardware to a combined RF window and multicasts the same wideband
+IQ stream to both UDP endpoints. AcquisitionApp receives the full combined-window IQ;
+the `slice_offset_hz` field in the `TASK_RESPONSE` tells it where within that wideband
+capture its scan slice is located:
+
+```
+actual_center_freq = device_cf + slice_offset_hz
+```
+
+`slice_offset_hz` **can change mid-stream** if a second task joins. When it does,
+`SdrResourceManager` publishes a `TASK_STATUS` update and sets `IQ_FLAG_DWELL_CHANGE`
+on the next packet. `TaskManagerIqSource` surfaces this as a new dwell start and
+`SpectrumScanner` discards the partial dwell automatically (same logic as a scan retune).
+
+If the combined-window SR is wider than the requested scan `sample_rate_sps`, the extra
+bandwidth is visible in the FFT but lies outside the `usable_bw_fraction` window; the
+threshold search ignores it unless signals alias into the scan band.
+
 ## Detection output
 
 Each detection published to `rf.detections` contains:
