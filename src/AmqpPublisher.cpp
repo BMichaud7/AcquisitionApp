@@ -8,8 +8,10 @@ namespace acq {
 using json = nlohmann::json;
 using namespace std::chrono;
 
-AmqpPublisher::AmqpPublisher(std::string url, std::string topic, std::string scanner_id)
-    : url_(std::move(url)), topic_(std::move(topic)), scanner_id_(std::move(scanner_id))
+AmqpPublisher::AmqpPublisher(std::string url, std::string username, std::string password,
+                             std::string topic, std::string scanner_id)
+    : url_(std::move(url)), username_(std::move(username)), password_(std::move(password)),
+      topic_(std::move(topic)), scanner_id_(std::move(scanner_id))
 {}
 
 AmqpPublisher::~AmqpPublisher() { stop(); }
@@ -41,10 +43,12 @@ void AmqpPublisher::publish(const Detection& d) {
 
 void AmqpPublisher::on_container_start(proton::container& c) {
     proton::connection_options opts;
-    if (!url_.empty()) {
-        // Extract credentials from config and set via options if needed
-    }
-    auto conn = c.connect(url_);
+    if (!username_.empty()) opts.user(username_);
+    if (!password_.empty()) opts.password(password_);
+    c.connect(url_, opts);
+}
+
+void AmqpPublisher::on_connection_open(proton::connection& conn) {
     conn.open_sender(topic_);
 }
 

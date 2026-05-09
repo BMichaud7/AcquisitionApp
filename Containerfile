@@ -72,7 +72,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         soapysdr-module-remote \
         libqpid-proton-cpp12 \
         libpq5 \
-        libpqxx-7.0 \
+        libpqxx-7.8t64 \
         tini \
     && rm -rf /var/lib/apt/lists/*
 

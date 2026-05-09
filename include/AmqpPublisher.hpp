@@ -18,7 +18,8 @@ namespace acq {
 // Thread-safe: publish() may be called from any thread.
 class AmqpPublisher : public proton::messaging_handler {
 public:
-    AmqpPublisher(std::string url, std::string topic, std::string scanner_id);
+    AmqpPublisher(std::string url, std::string username, std::string password,
+                  std::string topic, std::string scanner_id);
     ~AmqpPublisher();
 
     AmqpPublisher(const AmqpPublisher&)            = delete;
@@ -30,12 +31,15 @@ public:
 
     // proton messaging_handler overrides
     void on_container_start(proton::container&) override;
+    void on_connection_open(proton::connection&) override;
     void on_sender_open(proton::sender&) override;
     void on_transport_error(proton::transport&) override;
     void on_connection_error(proton::connection&) override;
 
 private:
     std::string         url_;
+    std::string         username_;
+    std::string         password_;
     std::string         topic_;
     std::string         scanner_id_;
     proton::sender      sender_;

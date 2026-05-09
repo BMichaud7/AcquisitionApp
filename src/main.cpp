@@ -68,7 +68,8 @@ int main(int argc, char* argv[]) {
     bool amqp_ok = false;
     try {
         amqp = std::make_unique<acq::AmqpPublisher>(
-            cfg.amqp.url, cfg.amqp.detection_topic, cfg.scanner_id);
+            cfg.amqp.url, cfg.amqp.username, cfg.amqp.password,
+            cfg.amqp.detection_topic, cfg.scanner_id);
         amqp->start();
         amqp_ok = true;
     } catch (const std::exception& e) {

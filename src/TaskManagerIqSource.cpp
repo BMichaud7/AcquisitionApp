@@ -41,9 +41,11 @@ struct AmqpResponse {
 
 class SyncAmqpExchange : public proton::messaging_handler {
 public:
-    SyncAmqpExchange(std::string url, std::string send_addr, std::string recv_addr,
+    SyncAmqpExchange(std::string url, std::string username, std::string password,
+                     std::string send_addr, std::string recv_addr,
                      std::string msg_body, std::string correlation_id, int timeout_sec)
-        : url_(std::move(url)), send_addr_(std::move(send_addr)),
+        : url_(std::move(url)), username_(std::move(username)), password_(std::move(password)),
+          send_addr_(std::move(send_addr)),
           recv_addr_(std::move(recv_addr)), body_(std::move(msg_body)),
           corr_id_(std::move(correlation_id)), timeout_sec_(timeout_sec) {}
 
@@ -60,7 +62,10 @@ public:
     }
 
     void on_container_start(proton::container& c) override {
-        c.connect(url_);
+        proton::connection_options opts;
+        if (!username_.empty()) opts.user(username_);
+        if (!password_.empty()) opts.password(password_);
+        c.connect(url_, opts);
     }
     void on_connection_open(proton::connection& conn) override {
         conn.open_sender(send_addr_);
@@ -94,7 +99,7 @@ public:
     void on_connection_error(proton::connection&) override {}
 
 private:
-    std::string    url_, send_addr_, recv_addr_, body_, corr_id_;
+    std::string    url_, username_, password_, send_addr_, recv_addr_, body_, corr_id_;
     int            timeout_sec_;
     AmqpResponse   result_;
 };
@@ -206,7 +211,7 @@ void TaskManagerIqSource::submitTask() {
     spdlog::info("[TaskMgrSrc] submitting SCAN task (req_id={})", req_id);
 
     SyncAmqpExchange exchange(
-        cfg_.amqp.url,
+        cfg_.amqp.url, cfg_.amqp.username, cfg_.amqp.password,
         cfg_.amqp.task_request_queue,
         cfg_.amqp.task_response_queue,
         body, req_id, 10);
@@ -239,7 +244,7 @@ void TaskManagerIqSource::sendTaskStop() {
         {"reason",         "scanner stopping"}
     };
     SyncAmqpExchange exchange(
-        cfg_.amqp.url,
+        cfg_.amqp.url, cfg_.amqp.username, cfg_.amqp.password,
         cfg_.amqp.task_request_queue,
         "",  // no reply expected
         msg.dump(), req_id, 5);
