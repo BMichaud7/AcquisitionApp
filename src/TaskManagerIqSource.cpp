@@ -6,6 +6,7 @@
 #include <proton/message.hpp>
 #include <proton/messaging_handler.hpp>
 #include <proton/connection.hpp>
+#include <proton/connection_options.hpp>
 #include <proton/sender.hpp>
 #include <proton/receiver.hpp>
 #include <proton/delivery.hpp>
@@ -63,8 +64,13 @@ public:
 
     void on_container_start(proton::container& c) override {
         proton::connection_options opts;
-        if (!username_.empty()) opts.user(username_);
-        if (!password_.empty()) opts.password(password_);
+        if (!username_.empty()) {
+            opts.sasl_allowed_mechs("PLAIN");
+            opts.sasl_allow_insecure_mechs(true);
+            opts.user(username_).password(password_);
+        } else {
+            opts.sasl_allowed_mechs("ANONYMOUS");
+        }
         c.connect(url_, opts);
     }
     void on_connection_open(proton::connection& conn) override {
@@ -214,14 +220,17 @@ void TaskManagerIqSource::submitTask() {
         cfg_.amqp.url, cfg_.amqp.username, cfg_.amqp.password,
         cfg_.amqp.task_request_queue,
         cfg_.amqp.task_response_queue,
-        body, req_id, 10);
+        body, req_id, 30);
 
     auto resp = exchange.run();
     if (!resp.received)
         throw std::runtime_error("Task request timed out — is the controller running?");
 
     auto j = json::parse(resp.body);
-    if (!j.value("accepted", false)) {
+    // Controller sends {"status": "ACCEPTED" | "REJECTED"} not {"accepted": bool}
+    bool accepted = (j.value("status", "REJECTED") == "ACCEPTED") ||
+                    j.value("accepted", false);
+    if (!accepted) {
         throw std::runtime_error(
             "Task rejected: " + j.value("reject_reason", "unknown"));
     }

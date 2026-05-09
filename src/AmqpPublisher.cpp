@@ -43,8 +43,13 @@ void AmqpPublisher::publish(const Detection& d) {
 
 void AmqpPublisher::on_container_start(proton::container& c) {
     proton::connection_options opts;
-    if (!username_.empty()) opts.user(username_);
-    if (!password_.empty()) opts.password(password_);
+    if (!username_.empty()) {
+        opts.sasl_allowed_mechs("PLAIN");
+        opts.sasl_allow_insecure_mechs(true);
+        opts.user(username_).password(password_);
+    } else {
+        opts.sasl_allowed_mechs("ANONYMOUS");
+    }
     c.connect(url_, opts);
 }
 
