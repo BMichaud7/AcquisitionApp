@@ -89,6 +89,8 @@ public:
         }
     }
     void on_message(proton::delivery& d, proton::message& msg) override {
+        // Always accept (ACK) messages to avoid stale redelivery across sessions.
+        d.accept();
         try {
             std::string b = proton::get<std::string>(msg.body());
             auto j = json::parse(b);
@@ -99,6 +101,7 @@ public:
                 result_.body     = b;
                 d.connection().close();
             }
+            // Non-matching messages are acknowledged and discarded (stale responses).
         } catch (...) {}
     }
     void on_transport_error(proton::transport&) override {}
