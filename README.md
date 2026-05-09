@@ -118,7 +118,7 @@ apt-get install -y \
     libqpid-proton-cpp12-dev \
     libpqxx-dev
 
-# CentOS Stream 10 — see Containerfile.test for exact build-from-source steps
+# CentOS Stream 10 — see Containerfile for exact build-from-source steps
 ```
 
 ## Building
@@ -126,10 +126,8 @@ apt-get install -y \
 **Unit tests (container — no hardware or broker needed):**
 
 ```bash
-# Must be run from the parent directory so COPY SdrTaskApi/ works
-podman build -f AcquisitionApp/Containerfile.test -t sdr-acq:test .
-podman run --rm sdr-acq:test                                   # exits 0 on pass
-podman run --rm sdr-acq:test ctest --output-on-failure -V      # verbose
+cd AcquisitionApp
+podman build --target test -t sdr-acq:test .
 ```
 
 **Native build (using the included build script):**

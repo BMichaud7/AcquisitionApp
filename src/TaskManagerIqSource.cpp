@@ -134,7 +134,7 @@ void TaskManagerIqSource::resetAccum() {
     current_center_hz_ = 0;
 }
 
-void TaskManagerIqSource::bindUdp() {
+void TaskManagerIqSource::bindUdp(uint16_t port) {
     udp_fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (udp_fd_ < 0)
         throw std::runtime_error(
@@ -146,19 +146,17 @@ void TaskManagerIqSource::bindUdp() {
 
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
-    addr.sin_port        = htons(static_cast<uint16_t>(cfg_.receiver.port));
+    addr.sin_port        = htons(port);
     inet_aton(cfg_.receiver.local_ip.c_str(), &addr.sin_addr);
 
     if (::bind(udp_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         ::close(udp_fd_); udp_fd_ = -1;
         throw std::runtime_error(
-            std::string("UDP bind() failed: ") + strerror(errno));
+            std::string("UDP bind() failed on port ") + std::to_string(port)
+            + ": " + strerror(errno));
     }
 
-    socklen_t len = sizeof(addr);
-    ::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&addr), &len);
-    bound_port_ = ntohs(addr.sin_port);
-    spdlog::info("[TaskMgrSrc] UDP socket bound on {}:{}", cfg_.receiver.local_ip, bound_port_);
+    spdlog::info("[TaskMgrSrc] UDP socket bound on {}:{}", cfg_.receiver.local_ip, port);
 }
 
 std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) const {
@@ -201,9 +199,8 @@ std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) con
             {"rx_gain_db",      gains}
         }},
         {"streaming", {
-            {"dest_ip",    cfg_.receiver.local_ip == "0.0.0.0"
-                           ? "127.0.0.1" : cfg_.receiver.local_ip},
-            {"dest_ports", json::array({bound_port_})}
+            {"dest_ip", cfg_.receiver.local_ip == "0.0.0.0"
+                        ? "127.0.0.1" : cfg_.receiver.local_ip}
         }},
         {"scan_params", {
             {"repeat",  true},
@@ -213,7 +210,8 @@ std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) con
     return req.dump();
 }
 
-void TaskManagerIqSource::submitTask() {
+// Returns the UDP port the controller allocated for our stream.
+uint16_t TaskManagerIqSource::submitTask() {
     std::string req_id = makeReqId();
     std::string body   = buildScanRequest(req_id);
 
@@ -238,7 +236,16 @@ void TaskManagerIqSource::submitTask() {
             "Task rejected: " + j.value("reject_reason", "unknown"));
     }
     task_id_ = j.value("task_id", "");
-    spdlog::info("[TaskMgrSrc] task accepted (task_id={})", task_id_);
+
+    // Controller allocates ports from its own pool and returns them in streams[].udp_port
+    uint16_t port = 0;
+    if (j.contains("streams") && !j["streams"].empty())
+        port = j["streams"][0].value("udp_port", 0);
+    if (port == 0)
+        throw std::runtime_error("ACCEPTED response missing streams[0].udp_port");
+
+    spdlog::info("[TaskMgrSrc] task accepted (task_id={} udp_port={})", task_id_, port);
+    return port;
 }
 
 void TaskManagerIqSource::sendTaskStop() {
@@ -266,8 +273,8 @@ void TaskManagerIqSource::sendTaskStop() {
 }
 
 void TaskManagerIqSource::open() {
-    bindUdp();
-    submitTask();
+    uint16_t port = submitTask();
+    bindUdp(port);
     resetAccum();
     running_ = true;
 }

@@ -27,7 +27,6 @@ public:
 private:
     SweepConfig      cfg_;
     int              udp_fd_{-1};
-    int              bound_port_{0};
     std::string      task_id_;
     std::atomic<bool> running_{false};
 
@@ -35,8 +34,8 @@ private:
     std::vector<std::vector<std::complex<float>>> ch_accum_;
     uint64_t current_center_hz_{0};
 
-    void         bindUdp();
-    void         submitTask();
+    void         bindUdp(uint16_t port);
+    uint16_t     submitTask();
     void         sendTaskStop();
     std::string  buildScanRequest(const std::string& req_id) const;
     void         resetAccum();
