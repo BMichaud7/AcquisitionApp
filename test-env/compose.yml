@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+
+  broker:
+    image: apache/activemq-artemis:2.36.0
+    container_name: acq-broker
+    environment:
+      ARTEMIS_USER: sdr_ctrl
+      ARTEMIS_PASSWORD: test_password
+    ports:
+      - "5673:5672"    # AMQP (5673 to avoid clash with AnalysisApp test broker)
+      - "8162:8161"
+    networks:
+      - acq-net
+    healthcheck:
+      test: ["CMD", "/var/lib/artemis-instance/bin/artemis", "check", "node", "--up"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+
+  acquisition:
+    image: localhost/sdr-acquisition:dev
+    container_name: sdr-acquisition
+    depends_on:
+      broker:
+        condition: service_healthy
+    volumes:
+      - ./config/scanner.xml:/etc/sdr-acquisition/scanner.xml:ro
+    environment:
+      SDR_LOG_LEVEL: debug
+      SDR_ACQ_CONFIG: /etc/sdr-acquisition/scanner.xml
+    network_mode: host   # needed for UDP (controller streams to 127.0.0.1:allocated_port)
+
+networks:
+  acq-net:
+    driver: bridge
