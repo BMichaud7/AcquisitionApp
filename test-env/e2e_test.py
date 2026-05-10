@@ -88,11 +88,13 @@ class _Base(proton.handlers.MessagingHandler):
 
     def __init__(self, broker: str):
         super().__init__()
-        self.broker = broker
+        self.broker     = broker
         self._senders: dict[str, proton.Sender] = {}
+        self._container = None
         self.error: str | None = None
 
     def _connect(self, event, *recv_addrs):
+        self._container = event.container
         conn = event.container.connect(
             self.broker, user=self.CREDS[0], password=self.CREDS[1],
             sasl_enabled=True, allowed_mechs="PLAIN",
@@ -102,7 +104,7 @@ class _Base(proton.handlers.MessagingHandler):
         return conn
 
     def _open_sender(self, conn, addr):
-        s = conn.open_sender(addr)
+        s = self._container.create_sender(conn, addr)
         self._senders[addr] = s
         return s
 
@@ -112,9 +114,9 @@ class _Base(proton.handlers.MessagingHandler):
         self._senders[addr].send(msg)
 
     def _parse(self, event) -> dict | None:
-        event.delivery.accept()
         try:
-            return json.loads(event.message.body)
+            body = event.message.body
+            return json.loads(body if isinstance(body, str) else body.decode())
         except Exception:
             return None
 
