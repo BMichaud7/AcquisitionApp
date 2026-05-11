@@ -45,13 +45,12 @@ def _iq_packet(seq: int, samples: np.ndarray, cf: float, sr: float,
     raw[1::2] = samples.imag
     return hdr + raw.tobytes()
 
-def _gen_fm(n: int = 4096, sr: float = 2e6, dev: float = 50e3) -> np.ndarray:
-    rng   = np.random.default_rng(7)
-    audio = rng.standard_normal(n).astype(np.float32)
-    audio /= np.max(np.abs(audio)) + 1e-9
-    phase = 2 * np.pi * dev / sr * np.cumsum(audio)
-    iq    = (np.exp(1j * phase)).astype(np.complex64)
-    return iq / np.sqrt(np.mean(np.abs(iq) ** 2))
+def _gen_cw(n: int = 4096, sr: float = 2e6, f_offset: float = 200e3) -> np.ndarray:
+    """Pure CW carrier at f_offset Hz from centre — produces a single sharp FFT peak,
+    easily detected above the noise floor (no FM spectral spreading)."""
+    t   = np.arange(n, dtype=np.float32) / sr
+    iq  = np.exp(1j * 2 * np.pi * f_offset * t).astype(np.complex64)
+    return iq
 
 def _stream_iq(dest_ip: str, dest_port: int, cf: float, sr: float,
                n_total: int = 400_000, pkt_sz: int = 1024,
@@ -59,7 +58,7 @@ def _stream_iq(dest_ip: str, dest_port: int, cf: float, sr: float,
     """Send IQ with DWELL_CHANGE flags so the scanner can produce detections."""
     time.sleep(delay_s)
     sock  = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    base  = _gen_fm(4096, sr)
+    base  = _gen_cw(4096, sr)
     full  = np.tile(base, math.ceil(n_total / len(base)))[:n_total]
     flags = IQ_FLAG_FIRST_PACKET | IQ_FLAG_DWELL_CHANGE
     seq   = 0
@@ -139,6 +138,7 @@ class _ScanFlowHandler(_Base):
         self.task_stop:      dict | None = None
         self.udp_port        = 0
         self._responded      = False
+        self._task_id:       str = ""
 
     def on_start(self, event):
         conn = self._connect(event, "sdr.task.request", "rf.detections")
@@ -166,13 +166,14 @@ class _ScanFlowHandler(_Base):
                 dest_ip = body.get("streaming", {}).get("dest_ip", "127.0.0.1")
                 cf      = body.get("rf", {}).get("center_freq_hz", 101e6)
                 sr      = body.get("rf", {}).get("sample_rate_sps", 2e6)
-                self.udp_port = _alloc_port()
+                self.udp_port    = _alloc_port()
+                self._task_id    = str(uuid.uuid4())
 
                 print(f"  [ctrl] ← TASK_REQUEST msg_type={msg_type}  allocating port {self.udp_port}")
                 self._send("sdr.task.response", {
                     "msg_type":   "TASK_RESPONSE",
                     "request_id": req_id,
-                    "task_id":    str(uuid.uuid4()),
+                    "task_id":    self._task_id,
                     "status":     "ACCEPTED",
                     "timestamp_ms": int(time.time() * 1000),
                     "streams": [{
@@ -194,7 +195,17 @@ class _ScanFlowHandler(_Base):
         elif addr == "rf.detections":
             self.detection = body
             print(f"  [ctrl] ← rf.detections  {body.get('center_freq_hz',0)/1e6:.2f} MHz  {body.get('power_db',0):.1f} dB")
-            # Close after first detection (enough to verify the pipeline works)
+            # Send TASK_STOP so scanner can start fresh for the next test
+            if self._task_id:
+                self._send("sdr.task.response", {
+                    "msg_type":     "TASK_RESPONSE",
+                    "request_id":   str(uuid.uuid4()),
+                    "task_id":      self._task_id,
+                    "status":       "ACCEPTED",
+                    "reject_reason": "test complete",
+                    "timestamp_ms": int(time.time() * 1000),
+                    "streams":      [],
+                })
             event.connection.close()
 
 
@@ -360,7 +371,7 @@ def main():
     results = {}
     for name, fn in tests.items():
         results[name] = fn(args.broker)
-        time.sleep(1)
+        time.sleep(5)  # give scanner time to reconnect and re-submit before next test
 
     print("\n── Summary ─────────────────────────────────────────────────────")
     all_ok = True

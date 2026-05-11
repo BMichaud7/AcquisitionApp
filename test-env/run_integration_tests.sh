@@ -12,6 +12,9 @@ TEST="${1:-}"
 echo "=== Building sdr-acquisition:dev ==="
 podman build --target runtime -t sdr-acquisition:dev ..
 
+echo "=== Building sdr-acquisition:test-integ ==="
+podman build --target test-integ -t sdr-acquisition:test-integ ..
+
 echo "=== Starting broker ==="
 podman run -d --rm --name acq-broker \
     -e ARTEMIS_USER=sdr_ctrl \
@@ -32,19 +35,19 @@ echo " ready"
 echo "=== Starting AcquisitionApp ==="
 podman run -d --rm --name sdr-acquisition \
     --network=host \
-    -v "$(pwd)/config/scanner.xml:/etc/sdr-acquisition/scanner.xml:ro" \
-    -e SDR_LOG_LEVEL=debug \
+    -v "$(pwd)/config/scanner.xml:/etc/sdr-acquisition/scanner.xml:ro,z" \
+    -e SDR_LOG_LEVEL=info \
     -e SDR_ACQ_CONFIG=/etc/sdr-acquisition/scanner.xml \
     localhost/sdr-acquisition:dev
 sleep 3
 
 echo "=== Running integration tests ==="
-pip install python-qpid-proton numpy --quiet
-
 if [ -n "$TEST" ]; then
-    python3 e2e_test.py --broker "$BROKER_URL" --test "$TEST"
+    podman run --rm --network=host sdr-acquisition:test-integ \
+        python3 /e2e_test.py --broker "$BROKER_URL" --test "$TEST"
 else
-    python3 e2e_test.py --broker "$BROKER_URL"
+    podman run --rm --network=host sdr-acquisition:test-integ \
+        python3 /e2e_test.py --broker "$BROKER_URL"
 fi
 RC=$?
 
