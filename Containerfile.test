@@ -76,12 +76,13 @@ RUN git clone --depth 1 --branch soapy-sdr-0.8.1 \
 RUN echo /usr/local/lib64 > /etc/ld.so.conf.d/local.conf && ldconfig
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  STEP 4 — Copy both sibling repos, then build
-#  SdrTaskApi is placed at ../SdrTaskApi relative to AcquisitionApp so
-#  the CMakeLists add_subdirectory(../SdrTaskApi ...) resolves correctly.
-#  nlohmann/json and GTest are fetched from GitHub during cmake configure.
+#  STEP 4 — Copy all sibling repos, then build
+#  SdrSdk placed at ../SdrSdk relative to AcquisitionApp; SdrTaskApi at
+#  ../SdrTaskApi (sibling of SdrSdk). nlohmann/json and GTest fetched
+#  from GitHub during cmake configure.
 # ─────────────────────────────────────────────────────────────────────────────
-COPY SdrTaskApi/    /build/SdrTaskApi/
+COPY SdrTaskApi/     /build/SdrTaskApi/
+COPY SdrSdk/         /build/SdrSdk/
 COPY AcquisitionApp/ /build/AcquisitionApp/
 
 RUN cmake -S /build/AcquisitionApp -B /build/AcquisitionApp/build \

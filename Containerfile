@@ -32,8 +32,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpqxx-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone SdrTaskApi as sibling (required by CMakeLists sibling detection)
-RUN git clone --depth 1 https://github.com/BMichaud7/SdrTaskApi.git /workspace/SdrTaskApi
+# Clone SdrSdk and SdrTaskApi as siblings (required by CMakeLists sibling detection)
+RUN git clone --depth 1 --branch "main/1.0" https://github.com/BMichaud7/SdrSdk.git /workspace/SdrSdk && \
+    git clone --depth 1 --branch "main/1.0" https://github.com/BMichaud7/SdrTaskApi.git /workspace/SdrTaskApi
 
 WORKDIR /workspace/AcquisitionApp
 COPY CMakeLists.txt .
