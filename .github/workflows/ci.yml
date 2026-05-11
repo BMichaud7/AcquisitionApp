@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: ["main/1.0"]
+  pull_request:
+    branches: ["main/1.0"]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config \
+            libqpid-proton-cpp12-dev \
+            libtinyxml2-dev \
+            libfmt-dev libspdlog-dev \
+            libfftw3-dev \
+            libpq-dev \
+            nlohmann-json3-dev
+
+      - name: Build libpqxx (not in Ubuntu 24.04 apt)
+        run: |
+          git clone --depth 1 --branch 7.9.2 \
+            https://github.com/jtv/libpqxx.git /tmp/libpqxx
+          cmake -S /tmp/libpqxx -B /tmp/libpqxx/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TEST=OFF -DBUILD_DOC=OFF
+          cmake --build /tmp/libpqxx/build --parallel
+          sudo cmake --install /tmp/libpqxx/build
+
+      - name: Clone SdrTaskApi (sibling dependency)
+        run: |
+          git clone --depth 1 \
+            https://github.com/BMichaud7/SdrTaskApi.git \
+            ../SdrTaskApi
+
+      - name: Configure
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXE_LINKER_FLAGS="-lpq"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run unit tests
+        run: ctest --test-dir build --output-on-failure -V --timeout 60
