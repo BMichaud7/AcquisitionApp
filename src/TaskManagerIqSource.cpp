@@ -82,6 +82,11 @@ public:
         proton::message msg;
         msg.body(body_);
         msg.content_type("application/json");
+        // Tell the controller exactly which queue to reply to.
+        // This prevents competing subscribers from consuming each other's
+        // TASK_ACCEPTED messages off the shared response queue.
+        if (!recv_addr_.empty())
+            msg.reply_to(recv_addr_);
         s.send(msg);
         if (recv_addr_.empty()) {
             result_.received = true;
@@ -125,12 +130,16 @@ static std::string makeReqId() {
 // ── TaskManagerIqSource ───────────────────────────────────────────────────────
 
 TaskManagerIqSource::TaskManagerIqSource(const SweepConfig& cfg) : cfg_(cfg) {
+    pkt_buf_.resize(65536);
     resetAccum();
 }
 TaskManagerIqSource::~TaskManagerIqSource() { close(); }
 
 void TaskManagerIqSource::resetAccum() {
     ch_accum_.assign((size_t)cfg_.device.rx_channels, {});
+    // Pre-reserve so packet inserts never reallocate mid-dwell.
+    for (auto& buf : ch_accum_)
+        buf.reserve(static_cast<size_t>(cfg_.sweep.dwell_samples));
     current_center_hz_ = 0;
 }
 
@@ -143,6 +152,12 @@ void TaskManagerIqSource::bindUdp(uint16_t port) {
     // Set receive timeout so next() can check the stop flag
     struct timeval tv = {.tv_sec = 0, .tv_usec = 100'000};  // 100 ms
     setsockopt(udp_fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    // Enlarge kernel receive buffer to absorb bursts at 20 MSPS (160 MB/s).
+    // The kernel doubles the value internally, so this requests ~32 MB effective.
+    int rcvbuf = 16 * 1024 * 1024;
+    if (setsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0)
+        spdlog::warn("[TaskMgrSrc] SO_RCVBUF failed: {}", strerror(errno));
 
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
@@ -183,6 +198,14 @@ std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) con
     auto now_ms = duration_cast<milliseconds>(
         system_clock::now().time_since_epoch()).count();
 
+    // Build the streaming object; include the pre-bound port so the controller
+    // can stream to it immediately without waiting for a handshake.
+    std::string dest_ip = (cfg_.receiver.local_ip == "0.0.0.0")
+                          ? "127.0.0.1" : cfg_.receiver.local_ip;
+    json streaming_obj = {{"dest_ip", dest_ip}};
+    if (prebound_port_ > 0)
+        streaming_obj["dest_ports"] = json::array({static_cast<int>(prebound_port_)});
+
     json req = {
         {"msg_type",       "TASK_REQUEST_SCAN"},
         {"schema_version", "2.0"},
@@ -198,12 +221,9 @@ std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) con
             {"rx_count",        cfg_.device.rx_channels},
             {"rx_gain_db",      gains}
         }},
-        {"streaming", {
-            {"dest_ip", cfg_.receiver.local_ip == "0.0.0.0"
-                        ? "127.0.0.1" : cfg_.receiver.local_ip}
-        }},
+        {"streaming", streaming_obj},
         {"scan_params", {
-            {"repeat",  true},
+            {"repeat",  false},
             {"entries", entries}
         }}
     };
@@ -273,8 +293,37 @@ void TaskManagerIqSource::sendTaskStop() {
 }
 
 void TaskManagerIqSource::open() {
-    uint16_t port = submitTask();
-    bindUdp(port);
+    // Pre-bind before submitting the task so the controller streams to a
+    // ready socket from the first packet — eliminates the race where
+    // AMQP delivery of TASK_ACCEPTED arrives after streaming has finished.
+    //
+    // With port=0, the OS assigns an ephemeral port (e.g. 54321); we include
+    // it in the task request's dest_ports[] so the controller honours it.
+    // With a fixed port in config, we bind that port and include it too.
+    uint16_t local_port = static_cast<uint16_t>(cfg_.receiver.port);
+    bindUdp(local_port);
+
+    // Learn the actual bound port (important when local_port==0).
+    if (local_port == 0) {
+        struct sockaddr_in sa{};
+        socklen_t sl = sizeof(sa);
+        getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&sa), &sl);
+        local_port = ntohs(sa.sin_port);
+    }
+    prebound_port_ = local_port;   // buildScanRequest() reads this
+
+    uint16_t ctrl_port = submitTask();
+    prebound_port_ = 0;
+
+    if (ctrl_port != 0 && ctrl_port != local_port) {
+        // Controller overrode our port (didn't support dest_ports[]) —
+        // re-bind to its assignment.  Data may be lost for this sweep.
+        spdlog::warn("[TaskMgrSrc] controller overrode port {} → {}; re-binding "
+                     "(upgrade controller to honour dest_ports[])",
+                     local_port, ctrl_port);
+        ::close(udp_fd_); udp_fd_ = -1;
+        bindUdp(ctrl_port);
+    }
     resetAccum();
     running_ = true;
 }
@@ -290,23 +339,41 @@ void TaskManagerIqSource::close() {
 }
 
 bool TaskManagerIqSource::next(Dwell& d) {
-    constexpr size_t MAX_PKT = 65536;
-    std::vector<uint8_t> pkt(MAX_PKT);
+    // Two-phase no-data timeout:
+    //  • Before the first packet arrives the SCAN task may sit in PENDING
+    //    while AnalysisApp finishes a WIDEBAND task — allow up to 60 s.
+    //  • After data starts flowing the inter-dwell gap (PLL calibration) is
+    //    3-4 s; allow 20 s before declaring the stream ended.
+    static constexpr int INITIAL_TIMEOUT_MS = 30000;
+    static constexpr int STREAM_TIMEOUT_MS  =  5000;
+    int no_data_ms     = 0;
+    bool first_packet  = true;
 
     while (running_) {
-        ssize_t n = ::recvfrom(udp_fd_, pkt.data(), pkt.size(), 0, nullptr, nullptr);
+        ssize_t n = ::recvfrom(udp_fd_, pkt_buf_.data(), pkt_buf_.size(), 0, nullptr, nullptr);
         if (n < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                no_data_ms += 100;
+                int limit = first_packet ? INITIAL_TIMEOUT_MS : STREAM_TIMEOUT_MS;
+                if (no_data_ms >= limit) {
+                    spdlog::info("[TaskMgrSrc] no IQ data for {}ms — task complete, re-submitting",
+                                 no_data_ms);
+                    return false;
+                }
+                continue;
+            }
             spdlog::error("[TaskMgrSrc] recvfrom error: {}", strerror(errno));
             return false;
         }
+        first_packet = false;
+        no_data_ms   = 0;
         if (static_cast<size_t>(n) < sizeof(IqPacketHeader)) continue;
 
-        const auto& hdr = *reinterpret_cast<const IqPacketHeader*>(pkt.data());
+        const auto& hdr = *reinterpret_cast<const IqPacketHeader*>(pkt_buf_.data());
         if (hdr.magic != IQ_MAGIC) continue;
 
         const auto* samples = reinterpret_cast<const std::complex<float>*>(
-            pkt.data() + sizeof(IqPacketHeader));
+            pkt_buf_.data() + sizeof(IqPacketHeader));
         int n_samp = hdr.num_samples;
         int ch     = hdr.channel_index;
 

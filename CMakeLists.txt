@@ -8,6 +8,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+    # -O3 over the default -O2, plus native SIMD (SSE4/AVX2 auto-vectorisation
+    # in the Welch inner loops). -fno-math-errno keeps IEEE compliance while
+    # allowing vectorisation of transcendentals.
+    add_compile_options(-O3 -march=native -fno-math-errno)
+    # Link-time optimisation across translation units.
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
 # ── PkgConfig ─────────────────────────────────────────────────────────────────

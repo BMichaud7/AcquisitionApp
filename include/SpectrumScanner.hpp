@@ -8,18 +8,14 @@
 #include <functional>
 #include <vector>
 #include <memory>
+#include <unordered_map>
 
 namespace acq {
 
-// Drives the sweep by pulling dwells from an IqSource, running FFT+detection
-// on each, and firing the callback for every signal found.
-// IqSource is injected so the same scanner works with both the task manager
-// (production) and a direct SoapySDR source (unit tests).
 class SpectrumScanner {
 public:
     using DetectionCallback = std::function<void(const Detection&)>;
 
-    // source must outlive the scanner.
     SpectrumScanner(SweepConfig cfg, IqSource* source, DetectionCallback cb);
     ~SpectrumScanner();
 
@@ -27,7 +23,7 @@ public:
     SpectrumScanner& operator=(const SpectrumScanner&) = delete;
 
     void start();
-    void stop();  // blocks until the sweep thread exits
+    void stop();
 
 private:
     SweepConfig       cfg_;
@@ -37,6 +33,29 @@ private:
     std::vector<std::unique_ptr<FftProcessor>> processors_;
     std::atomic<bool>         running_{false};
     std::thread               thread_;
+
+    // Per-channel, per-center-frequency asymmetric-EMA noise floor.
+    // Rises fast (new interference) / falls slow (avoid immediate false alarms).
+    std::vector<std::unordered_map<uint64_t, std::vector<float>>> ch_noise_floor_;
+
+    // Persistence filter: track hit/miss counts per (channel, center_hz, freq).
+    // A detection is emitted only after PERSIST_MIN_HITS confirmations, unless
+    // PAPR ≥ PERSIST_BYPASS_PAPR (strong/obvious signal → emit immediately).
+    struct PersistEntry {
+        int   hits{0};
+        int   misses{0};
+        float peak_db{-300.f};
+    };
+    std::vector<std::unordered_map<uint64_t,
+        std::unordered_map<uint64_t, PersistEntry>>> ch_persist_;
+
+    // Frequencies are quantised to this step before persistence lookup.
+    // Coarse enough to tolerate sub-bin interpolation jitter across sweeps.
+    static constexpr uint64_t PERSIST_FREQ_QUANT_HZ = 10'000;
+    static constexpr int      PERSIST_MIN_HITS       = 2;
+    static constexpr int      PERSIST_MAX_MISSES      = 4;
+    // Signals with PAPR above this threshold bypass persistence (emit on first sweep).
+    static constexpr float    PERSIST_BYPASS_PAPR_DB  = 15.0f;
 
     void sweepLoop();
     std::vector<Detection> processDwell(int ch, uint64_t center_hz,

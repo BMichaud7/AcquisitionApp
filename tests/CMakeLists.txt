@@ -65,3 +65,23 @@ target_compile_definitions(acq_tests PRIVATE
 include(CTest)
 include(GoogleTest)
 gtest_discover_tests(acq_tests)
+
+# ── Benchmark binary ──────────────────────────────────────────────────────────
+# Not registered with CTest; run manually: build/tests/acq_bench
+add_executable(acq_bench
+    bench/bench_fft_processor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/FftProcessor.cpp
+)
+target_include_directories(acq_bench PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${_SPDLOG_INCS}
+)
+target_link_libraries(acq_bench PRIVATE
+    PkgConfig::FFTW3F
+    ${_SPDLOG_LIBS}
+    Threads::Threads
+)
+target_compile_definitions(acq_bench PRIVATE
+    SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF
+    ${_SPDLOG_DEFS}
+)

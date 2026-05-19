@@ -139,6 +139,81 @@ TEST_F(SpectrumScannerTest, DetectionHasReasonableMetadata) {
     EXPECT_LT(fc, 108e6);
 }
 
+// ── IQ snapshot ───────────────────────────────────────────────────────────────
+
+TEST_F(SpectrumScannerTest, DetectionHasIqSnapshot) {
+    // Every confirmed detection must carry an IQ snapshot.
+    // Snapshot size = min(1024, dwell_samples) × 2 interleaved floats.
+    // Test config uses dwell_samples=256, so expected = 256×2 = 512.
+    // In production (dwell_samples=131072) the snapshot is always 2048.
+    FakeAcqSoapy::tone_enabled.store(true);
+    FakeAcqSoapy::tone_freq_frac.store(0.25f);
+    FakeAcqSoapy::tone_amplitude.store(1.0f);
+
+    Detection captured{};
+    std::atomic<bool> got{false};
+    SoapyIqSource source(makeTestConfig());
+    SpectrumScanner scanner(makeTestConfig(), &source,
+        [&](const Detection& d){ if (!got.exchange(true)) captured = d; });
+    scanner.start();
+    waitFor([&]{ return got.load(); }, 500);
+    scanner.stop();
+
+    ASSERT_TRUE(got.load()) << "No detection received within timeout";
+    // Must be non-empty, even, and at most 2048 (1024 complex samples)
+    EXPECT_FALSE(captured.iq_snapshot.empty())
+        << "IQ snapshot must be present on every confirmed detection";
+    EXPECT_EQ(captured.iq_snapshot.size() % 2, 0u)
+        << "Snapshot size must be even (interleaved I,Q pairs)";
+    EXPECT_LE(captured.iq_snapshot.size(), 2048u)
+        << "Snapshot must not exceed 1 024 complex samples";
+    EXPECT_GT(captured.snapshot_sample_rate_sps, 0.0)
+        << "snapshot_sample_rate_sps must be positive";
+}
+
+TEST_F(SpectrumScannerTest, SnapshotSampleRateMatchesConfig) {
+    FakeAcqSoapy::tone_enabled.store(true);
+    FakeAcqSoapy::tone_freq_frac.store(0.25f);
+    FakeAcqSoapy::tone_amplitude.store(1.0f);
+
+    Detection captured{};
+    std::atomic<bool> got{false};
+    SoapyIqSource source(makeTestConfig());
+    SpectrumScanner scanner(makeTestConfig(), &source,
+        [&](const Detection& d){ if (!got.exchange(true)) captured = d; });
+    scanner.start();
+    waitFor([&]{ return got.load(); }, 500);
+    scanner.stop();
+
+    ASSERT_TRUE(got.load());
+    // makeTestConfig sets sample_rate = 10 MHz
+    EXPECT_NEAR(captured.snapshot_sample_rate_sps, 10e6, 1.0)
+        << "snapshot_sample_rate_sps must match the configured device sample rate";
+}
+
+TEST_F(SpectrumScannerTest, SnapshotContainsNonZeroSamples) {
+    // The snapshot must hold actual IQ data, not a zeroed buffer.
+    FakeAcqSoapy::tone_enabled.store(true);
+    FakeAcqSoapy::tone_freq_frac.store(0.25f);
+    FakeAcqSoapy::tone_amplitude.store(1.0f);
+
+    Detection captured{};
+    std::atomic<bool> got{false};
+    SoapyIqSource source(makeTestConfig());
+    SpectrumScanner scanner(makeTestConfig(), &source,
+        [&](const Detection& d){ if (!got.exchange(true)) captured = d; });
+    scanner.start();
+    waitFor([&]{ return got.load(); }, 500);
+    scanner.stop();
+
+    ASSERT_TRUE(got.load());
+    ASSERT_FALSE(captured.iq_snapshot.empty());
+    float rms = 0.f;
+    for (float v : captured.iq_snapshot) rms += v * v;
+    rms = std::sqrt(rms / (float)captured.iq_snapshot.size());
+    EXPECT_GT(rms, 1e-6f) << "Snapshot should contain non-zero signal samples";
+}
+
 // ── Multi-channel ─────────────────────────────────────────────────────────────
 
 TEST_F(SpectrumScannerTest, TwoChannels_StartStop) {

@@ -2,10 +2,11 @@
 #include <chrono>
 #include <string>
 #include <cstdint>
+#include <vector>
 
 namespace acq {
 
-inline constexpr const char* SCHEMA_VERSION = "1.0";
+inline constexpr const char* SCHEMA_VERSION = "1.1";  // added iq_snapshot (2024-Q4)
 
 struct Detection {
     std::chrono::system_clock::time_point timestamp;
@@ -14,6 +15,12 @@ struct Detection {
     float    power_db{0.f};
     std::string scanner_id;
     int      channel{0};
+
+    // 1 024-sample IQ snapshot taken directly from the detecting dwell.
+    // Interleaved float32 I,Q,I,Q,... at snapshot_sample_rate_sps.
+    // AnalysisApp uses this for zero-acquisition ONNX fast-path classification.
+    std::vector<float> iq_snapshot;
+    double             snapshot_sample_rate_sps{0.0};
 };
 
 } // namespace acq

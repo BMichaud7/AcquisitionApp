@@ -40,6 +40,19 @@ struct SweepParams {
     double   threshold_db{10.0};
     uint32_t min_signal_bw_hz{1'000};
     int      settle_samples{512};
+    // Bins within this many Hz of the tuned center are blanked before peak
+    // detection to suppress AD9361 LO leakage. Set 0 to disable.
+    uint32_t dc_guard_hz{50'000};
+    // CA-CFAR: guard cells each side of test cell (exclude signal from noise ref).
+    // Reference cells each side used to estimate local noise floor.
+    int      cfar_guard_bins{8};
+    int      cfar_ref_bins{32};
+    // Minimum peak-to-mean power ratio (dB) within a candidate signal group.
+    // Multi-bin noise bumps with no clear spectral peak are rejected.
+    float    min_papr_db{3.0f};
+    // Exponential moving average coefficient for per-frequency noise floor.
+    // Smaller = slower adaptation (more smoothing). Range (0, 1).
+    float    noise_floor_alpha{0.08f};
 };
 
 // Where the acquisition should bind to receive IQ data from the controller.
@@ -51,6 +64,9 @@ struct ReceiverConfig {
 struct SweepConfig {
     std::string    scanner_id{"scanner-0"};
     int            rank{0};
+    // After each sweep pass the scanner sleeps this long (ms) before re-submitting,
+    // giving AnalysisApp a guaranteed window to grab the SDR. 0 = disabled.
+    int            analysis_pause_ms{0};
     AmqpConfig     amqp;
     DbConfig       db;
     DeviceConfig   device;

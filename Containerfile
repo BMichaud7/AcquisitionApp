@@ -92,6 +92,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN groupadd -r sdr && useradd -r -g sdr -s /sbin/nologin sdr
 RUN mkdir -p /etc/sdr-acquisition && chown sdr:sdr /etc/sdr-acquisition
+# FFTW_PATIENT saves its optimised plan here so every restart loads it
+# instantly instead of re-measuring (which adds 5–30 s per FFT size).
+RUN mkdir -p /var/cache/sdr-acquisition && chown sdr:sdr /var/cache/sdr-acquisition
 
 COPY --from=builder /install/bin/sdr_acquisition /usr/local/bin/sdr_acquisition
 COPY --from=builder /install/etc/sdr-acquisition /etc/sdr-acquisition

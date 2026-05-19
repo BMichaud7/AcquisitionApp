@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/BMichaud7/AcquisitionApp/schema/rf_detection.schema.json",
+  "title": "RF_DETECTION",
+  "description": "Signal detection event published by sdr_acquisition to the rf.detections AMQP topic whenever a signal clears the CA-CFAR threshold, the PAPR filter, and the persistence filter.",
+
+  "type": "object",
+  "required": [
+    "msg_type", "schema_version", "timestamp_ms",
+    "scanner_id", "center_freq_hz", "bandwidth_hz", "power_db", "channel"
+  ],
+  "additionalProperties": false,
+
+  "properties": {
+
+    "msg_type": {
+      "type": "string",
+      "const": "RF_DETECTION",
+      "description": "Discriminator field — always 'RF_DETECTION'."
+    },
+
+    "schema_version": {
+      "type": "string",
+      "description": "Message schema version. Consumers should ignore unknown fields from higher versions.",
+      "examples": ["1.0", "1.1"]
+    },
+
+    "timestamp_ms": {
+      "type": "integer",
+      "description": "Unix epoch timestamp in milliseconds (system_clock, UTC) at the moment the detection was confirmed."
+    },
+
+    "scanner_id": {
+      "type": "string",
+      "description": "Identifier of the scanner instance that produced this detection (matches <scanner_id> in scanner.xml)."
+    },
+
+    "center_freq_hz": {
+      "type": "number",
+      "description": "Sub-bin parabolic-interpolated centre frequency of the detected signal in Hz. Accuracy: ±1–2 kHz at 20 MSPS / 4096-point FFT."
+    },
+
+    "bandwidth_hz": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Estimated occupied bandwidth in Hz, measured as the distance between the first and last bins of the detection run."
+    },
+
+    "power_db": {
+      "type": "number",
+      "description": "Peak power of the detection run in dBFS (decibels relative to full-scale). Negative values only."
+    },
+
+    "channel": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Zero-based RX channel index on the hardware device."
+    },
+
+    "iq_snapshot": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 2,
+      "maxItems": 2048,
+      "description": "Interleaved float32 IQ samples from the detecting dwell: [I₀, Q₀, I₁, Q₁, …]. Always 2048 values (1 024 complex samples) when present. The sample rate is given by snapshot_sample_rate_sps. Introduced in schema_version 1.1. Used by AnalysisApp for zero-acquisition ONNX fast-path classification."
+    },
+
+    "snapshot_sample_rate_sps": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Sample rate of the iq_snapshot in samples per second (typically the scan sample rate, e.g. 20 000 000). Present whenever iq_snapshot is present. Introduced in schema_version 1.1."
+    }
+  },
+
+  "if": {
+    "required": ["iq_snapshot"]
+  },
+  "then": {
+    "required": ["snapshot_sample_rate_sps"]
+  },
+
+  "$comment": "Version history: 1.0 — initial release. 1.1 — added iq_snapshot + snapshot_sample_rate_sps (optional, for ONNX fast-path in AnalysisApp)."
+}

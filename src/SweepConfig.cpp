@@ -42,6 +42,8 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         cfg.scanner_id = el->GetText() ? el->GetText() : cfg.scanner_id;
     if (auto* el = opt(root, "rank"))
         el->QueryIntText(&cfg.rank);
+    if (auto* el = opt(root, "analysis_pause_ms"))
+        el->QueryIntText(&cfg.analysis_pause_ms);
 
     // ── AMQP ────────────────────────────────────────────────────────────────
     if (auto* amqp = opt(root, "amqp")) {
@@ -86,6 +88,12 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
     if (auto* el = opt(sweep, "min_signal_bw_hz"))
         el->QueryUnsigned64Text(reinterpret_cast<uint64_t*>(&cfg.sweep.min_signal_bw_hz));
     if (auto* el = opt(sweep, "settle_samples"))    el->QueryIntText(&cfg.sweep.settle_samples);
+    if (auto* el = opt(sweep, "dc_guard_hz"))
+        el->QueryUnsigned64Text(reinterpret_cast<uint64_t*>(&cfg.sweep.dc_guard_hz));
+    if (auto* el = opt(sweep, "cfar_guard_bins"))   el->QueryIntText(&cfg.sweep.cfar_guard_bins);
+    if (auto* el = opt(sweep, "cfar_ref_bins"))     el->QueryIntText(&cfg.sweep.cfar_ref_bins);
+    if (auto* el = opt(sweep, "min_papr_db"))       el->QueryFloatText(&cfg.sweep.min_papr_db);
+    if (auto* el = opt(sweep, "noise_floor_alpha")) el->QueryFloatText(&cfg.sweep.noise_floor_alpha);
 
     if (cfg.sweep.stop_hz <= cfg.sweep.start_hz)
         throw std::runtime_error("sweep stop_hz must be > start_hz");

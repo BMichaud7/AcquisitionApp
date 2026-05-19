@@ -86,6 +86,13 @@ proton::message AmqpPublisher::makeMessage(const Detection& d) const {
         {"channel",         d.channel}
     };
 
+    // Embed IQ snapshot for zero-acquisition ONNX fast-path in AnalysisApp.
+    // 1 024 complex samples × 2 floats = 2 048 float values ≈ 16 KB as JSON.
+    if (!d.iq_snapshot.empty()) {
+        body["iq_snapshot"]               = d.iq_snapshot;
+        body["snapshot_sample_rate_sps"]  = d.snapshot_sample_rate_sps;
+    }
+
     proton::message msg;
     msg.body(body.dump());
     msg.content_type("application/json");

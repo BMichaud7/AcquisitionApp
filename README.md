@@ -17,9 +17,60 @@ SoapyIqSource (unit tests only — bypasses AMQP, drives hardware directly)
      ▼
 SpectrumScanner
      │  per dwell:
+     │   1. Welch-average IQ → power spectrum (FftProcessor::computeSpectrum)
+     │   2. CA-CFAR per-bin detection          (FftProcessor::detectFromSpectrum)
+     │   3. Persistence filter                 (SpectrumScanner::processDwell)
      ▼
-FftProcessor ──► Detection callback ──► AMQP rf.detections topic
+Detection callback ──► AMQP rf.detections topic
+                   ──► PostgreSQL detections table
 ```
+
+## Detection pipeline
+
+Each dwell goes through four stages:
+
+### 1. Welch spectrum averaging
+`dwell_samples` of CF32 IQ are split into 50%-overlapping frames of `fft_size` samples. Each frame is DC-removed and Blackman-Harris windowed before FFT. All frame power spectra are averaged linearly, then converted to dBFS.
+
+**Blackman-Harris window** — ~92 dB sidelobe rejection vs ~31 dB for Hann. Prevents strong broadcast stations (FM, LTE) from producing ghost detections in adjacent bins.
+
+**Welch averaging** — 63 frames at 131 072 samples (20 MSPS × 6.6 ms dwell) reduces the noise floor variance by ~18 dB vs a single-shot FFT, enabling detection of signals just above the noise floor.
+
+### 2. CA-CFAR detection
+For each bin, the local noise floor is estimated by averaging 32 reference bins on each side (skipping 8 guard bins to exclude the signal itself). This is computed in O(N) via a prefix sum, the same cost as the previous global-median approach.
+
+A bin enters a candidate run when its power exceeds `local_noise + threshold_db`. Runs are then filtered by two quality gates:
+
+- **Minimum bandwidth** — runs narrower than `min_signal_bw_hz` are discarded (removes single-bin spurs)
+- **PAPR filter** — multi-bin runs with peak-to-mean power ratio < `min_papr_db` are discarded (removes flat noise bumps with no spectral peak)
+
+The peak bin of each surviving run is sub-bin interpolated using a 3-point parabola, giving the reported `center_freq_hz` sub-bin accuracy (~1–2 kHz at 20 MSPS / 4096 bins).
+
+### 3. Persistence filter
+Each candidate must be detected at the same quantised frequency (±10 kHz) in at least 2 consecutive sweeps before the detection callback fires. This eliminates single-dwell noise spurs and random false alarms.
+
+Bypass: signals with PAPR ≥ 15 dB (strong, obvious signals — FM broadcast, LTE, cellular) emit immediately on the first sweep without waiting for confirmation.
+
+### 4. Per-frequency noise floor EMA
+An asymmetric exponential moving average tracks the observed spectrum at each center frequency across sweeps. Rising noise uses `4 × alpha` (new interference suppressed quickly); falling noise uses `alpha` (slower decay, prevents immediate re-detection). This floor is maintained for monitoring; it is not used in the detection path to avoid suppressing persistent signals.
+
+## Benchmark results
+
+Measured inside the build container (Ubuntu 24.04, Release build):
+
+| Input | computeSpectrum | detectFromSpectrum | Full pipeline |
+|---|---|---|---|
+| Realistic RF (4 tones + AWGN) | 0.664 ms | 0.020 ms | 0.691 ms |
+| Noise only | 0.649 ms | 0.020 ms | 0.696 ms |
+
+**Config**: FFT size 4096, dwell 131 072 samples at 20 MSPS (6.6 ms real time), 63 Welch frames.
+
+- **SDR receive time**: 6.6 ms/dwell at 20 MSPS  
+- **Processing overhead**: ~0.7 ms/dwell = **10.5% of dwell time**  
+- **Real-time headroom**: **9.5× faster than real time** (processes one dwell while the SDR delivers the next)  
+- **Throughput**: 195 M samples/sec sustained
+
+The bottleneck is the SDR hardware (IQ receive rate), not the CPU. Even a 2× improvement in FFT speed would only reduce end-to-end scan time by ~5%.
 
 ## Configuration
 
@@ -28,7 +79,7 @@ FftProcessor ──► Detection callback ──► AMQP rf.detections topic
 ```xml
 <sdr_acquisition>
   <scanner_id>scanner-0</scanner_id>
-  <rank>1</rank>                        <!-- required: preemption tier (0 = lowest) -->
+  <rank>2</rank>  <!-- higher rank preempts AnalysisApp (rank 1) when re-submitting -->
 
   <amqp>
     <url>amqp://activemq-service.sdr-system:5672</url>
@@ -41,39 +92,51 @@ FftProcessor ──► Detection callback ──► AMQP rf.detections topic
 
   <device>
     <rx_channels>1</rx_channels>
-    <sample_rate_sps>10000000</sample_rate_sps>
+    <sample_rate_sps>20000000</sample_rate_sps>
     <rx_gain_db>40</rx_gain_db>
-    <bandwidth_hz>10000000</bandwidth_hz>
+    <bandwidth_hz>20000000</bandwidth_hz>
   </device>
 
   <sweep>
-    <start_hz>70000000</start_hz>
-    <stop_hz>1000000000</stop_hz>
-    <dwell_samples>4096</dwell_samples>
+    <start_hz>80000000</start_hz>
+    <stop_hz>3000000000</stop_hz>
+    <dwell_samples>131072</dwell_samples>
     <fft_size>4096</fft_size>
     <usable_bw_fraction>0.80</usable_bw_fraction>
     <threshold_db>10.0</threshold_db>
     <min_signal_bw_hz>1000</min_signal_bw_hz>
+    <dc_guard_hz>50000</dc_guard_hz>
+    <cfar_guard_bins>8</cfar_guard_bins>
+    <cfar_ref_bins>32</cfar_ref_bins>
+    <min_papr_db>3.0</min_papr_db>
+    <noise_floor_alpha>0.08</noise_floor_alpha>
     <settle_samples>512</settle_samples>
+    <analysis_pause_ms>15000</analysis_pause_ms>
   </sweep>
 </sdr_acquisition>
 ```
 
 ### `<rank>` field
 
-**Required at runtime** (the controller rejects requests without it). Sets the preemption tier for the scan task. A scan at `rank=2` will displace any running task at `rank=0` or `rank=1` on the target device if spectrum is unavailable. Default in the struct is `0` (lowest priority — can be preempted by anything with `rank > 0`).
+**Required at runtime** (the controller rejects requests without it). Sets the preemption tier for the scan task. Default: `2` (above AnalysisApp at rank 1, preempted by nothing at rank 3+).
 
 ### Sweep parameters
 
-| Parameter | Description |
-|-----------|-------------|
-| `start_hz` / `stop_hz` | Frequency sweep range |
-| `dwell_samples` | Samples collected per dwell (must be ≥ `fft_size`) |
-| `fft_size` | FFT size (power of 2, ≥ 64) |
-| `usable_bw_fraction` | Fraction of FFT bins examined (discard roll-off edges) |
-| `threshold_db` | Detection threshold above estimated per-dwell noise floor (dB) |
-| `min_signal_bw_hz` | Minimum contiguous bandwidth for a detection to be reported |
-| `settle_samples` | Samples discarded after each retune before collecting dwell |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `start_hz` / `stop_hz` | 70 MHz / 1 GHz | Frequency sweep range |
+| `dwell_samples` | 4096 | Samples collected per dwell (≥ `fft_size`) |
+| `fft_size` | 4096 | FFT size (power of 2, ≥ 64) |
+| `usable_bw_fraction` | 0.80 | Fraction of bins examined (discards roll-off edges) |
+| `threshold_db` | 10.0 | Detection threshold above local CA-CFAR noise estimate (dB) |
+| `min_signal_bw_hz` | 1000 | Minimum run width to be reported as a detection |
+| `dc_guard_hz` | 50 000 | Bins within this range of DC are blanked (LO leakage suppression) |
+| `cfar_guard_bins` | 8 | CA-CFAR guard cells each side of test cell |
+| `cfar_ref_bins` | 32 | CA-CFAR reference cells each side for local noise average |
+| `min_papr_db` | 3.0 | Minimum peak-to-mean power ratio for multi-bin detections |
+| `noise_floor_alpha` | 0.08 | EMA coefficient for per-frequency noise floor (~12-sweep time constant) |
+| `settle_samples` | 512 | Samples discarded after each retune |
+| `analysis_pause_ms` | 0 | Pause after each sweep pass to yield SDR to AnalysisApp (0 = disabled) |
 
 ## Dependencies
 
@@ -87,9 +150,6 @@ parent/
 ├── SdrResourceManager/   ← https://github.com/BMichaud7/SdrResourceManager
 └── AcquisitionApp/       ← this repo
 ```
-
-If SdrTaskApi is not found as a sibling, CMake falls back to an installed
-`sdr_task_api` package and fails with a helpful message if neither is available.
 
 ### Dependency table
 
@@ -105,22 +165,6 @@ If SdrTaskApi is not found as a sibling, CMake falls back to an installed
 | `libqpid-proton-cpp12-dev` | `sdr_acquisition` binary only | AMQP broker connection |
 | `libpqxx-dev` | `sdr_acquisition` binary only | PostgreSQL detection DB |
 
-CMake prints a `FATAL_ERROR` with the exact install command for any missing
-required dependency. The `sdr_acquisition` binary is silently skipped (with a
-`STATUS` message) when qpid-proton or libpqxx are not found.
-
-```bash
-# Ubuntu 24.04 — unit tests + production binary
-apt-get install -y \
-    build-essential cmake pkg-config git \
-    libtinyxml2-dev libfftw3-dev libfmt-dev libspdlog-dev \
-    libsoapysdr-dev soapysdr-module-remote \
-    libqpid-proton-cpp12-dev \
-    libpqxx-dev
-
-# CentOS Stream 10 — see Containerfile for exact build-from-source steps
-```
-
 ## Building
 
 **Unit tests (container — no hardware or broker needed):**
@@ -130,69 +174,57 @@ cd AcquisitionApp
 podman build --target test -t sdr-acq:test .
 ```
 
-**Native build (using the included build script):**
+**Benchmark (run the FftProcessor timing benchmark):**
 
 ```bash
-git clone https://github.com/BMichaud7/AcquisitionApp.git
-cd AcquisitionApp
-
-./build.sh             # Release build — clones SdrTaskApi automatically
-./build.sh --tests     # Release build + run all 48 unit tests
-./build.sh --debug     # Debug build (AddressSanitizer + UBSan)
-./build.sh --clean     # Wipe build/ and rebuild from scratch
-./build.sh --no-clone  # Skip git-clone (SdrTaskApi already present)
-./build.sh --help      # All options
+podman build --target builder -t acq-builder .
+podman run --rm acq-builder /workspace/AcquisitionApp/build/tests/acq_bench
 ```
 
-Or directly with CMake:
+**Native build:**
 
 ```bash
-# Clone SdrTaskApi sibling first
 git clone https://github.com/BMichaud7/SdrTaskApi.git ../SdrTaskApi
 
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel $(nproc)
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure     # 61 unit tests
+./build/tests/acq_bench                        # benchmark
 ```
 
-Test suite covers 48 cases across `FftProcessor`, `SpectrumScanner`, and `SweepConfig`.
-
-The production binary (`sdr_acquisition`) requires qpid-proton and libpqxx (PostgreSQL)
-and is skipped automatically at configure time if those packages are absent.
-
-## Combined-window / shared-channel IQ streams
-
-When `SdrResourceManager` accepts two tasks at nearby frequencies on a `shared_lo=true`
-device, it retuning the hardware to a combined RF window and multicasts the same wideband
-IQ stream to both UDP endpoints. AcquisitionApp receives the full combined-window IQ;
-the `slice_offset_hz` field in the `TASK_RESPONSE` tells it where within that wideband
-capture its scan slice is located:
-
-```
-actual_center_freq = device_cf + slice_offset_hz
-```
-
-`slice_offset_hz` **can change mid-stream** if a second task joins. When it does,
-`SdrResourceManager` publishes a `TASK_STATUS` update and sets `IQ_FLAG_DWELL_CHANGE`
-on the next packet. `TaskManagerIqSource` surfaces this as a new dwell start and
-`SpectrumScanner` discards the partial dwell automatically (same logic as a scan retune).
-
-If the combined-window SR is wider than the requested scan `sample_rate_sps`, the extra
-bandwidth is visible in the FFT but lies outside the `usable_bw_fraction` window; the
-threshold search ignores it unless signals alias into the scan band.
+Test suite covers 61 cases across `FftProcessor`, `SpectrumScanner`, and `SweepConfig`.
 
 ## Detection output
 
-Each detection published to `rf.detections` contains:
+Each detection published to `rf.detections` (schema version **1.1**) contains:
 
-| Field | Description |
-|-------|-------------|
-| `scanner_id` | From config `<scanner_id>` |
-| `channel` | RX channel index (0-based) |
-| `center_freq_hz` | Estimated signal center frequency |
-| `bandwidth_hz` | Estimated signal bandwidth |
-| `power_db` | Peak power in detection run (dBFS) |
-| `timestamp` | Detection time (system clock) |
+| Field | Type | Description |
+|-------|------|-------------|
+| `msg_type` | string | Always `"RF_DETECTION"` |
+| `schema_version` | string | `"1.1"` |
+| `timestamp_ms` | integer | Unix epoch ms (UTC) |
+| `scanner_id` | string | From config `<scanner_id>` |
+| `channel` | integer | RX channel index (0-based) |
+| `center_freq_hz` | number | Sub-bin interpolated center frequency (Hz) |
+| `bandwidth_hz` | integer | Estimated occupied bandwidth (Hz) |
+| `power_db` | number | Peak power in the detection run (dBFS) |
+| `iq_snapshot` | float array | **v1.1+** 1 024 complex samples (2 048 interleaved I,Q floats) from the detecting dwell. Used by AnalysisApp for zero-acquisition ONNX classification. |
+| `snapshot_sample_rate_sps` | number | **v1.1+** Sample rate of `iq_snapshot` (Hz, matches scan `sample_rate_sps`). Always present alongside `iq_snapshot`. |
+
+The full JSON Schema is in [`schema/rf_detection.schema.json`](schema/rf_detection.schema.json).
+
+### Schema version history
+
+| Version | Change |
+|---------|--------|
+| 1.0 | Initial release |
+| 1.1 | Added `iq_snapshot` + `snapshot_sample_rate_sps` (optional, for ONNX fast-path) |
+
+## AnalysisApp co-existence
+
+When `analysis_pause_ms > 0`, the scanner releases the SDR after each sweep pass and sleeps for that duration, giving AnalysisApp (lower rank) a guaranteed window to grab the device for wideband classification. On re-submission, the scanner's higher rank preempts any running analysis.
+
+Recommended cycle with 20 MSPS PlutoSDR: 8s scan + 5s drain + 15s analysis window ≈ 28s per full cycle.
 
 ## Repository
 

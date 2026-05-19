@@ -33,12 +33,17 @@ private:
     // Channel accumulation buffers: [channel][samples]
     std::vector<std::vector<std::complex<float>>> ch_accum_;
     uint64_t current_center_hz_{0};
+    std::vector<uint8_t> pkt_buf_;  // pre-allocated UDP recv buffer
 
     void         bindUdp(uint16_t port);
     uint16_t     submitTask();
     void         sendTaskStop();
     std::string  buildScanRequest(const std::string& req_id) const;
     void         resetAccum();
+
+    // Port pre-bound before submitTask(); included in dest_ports[] so the
+    // controller streams to the already-listening socket (eliminates race).
+    uint16_t     prebound_port_{0};
 };
 
 } // namespace acq
