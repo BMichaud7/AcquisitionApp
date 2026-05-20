@@ -120,7 +120,26 @@ The bottleneck is the SDR hardware (IQ receive rate), not the CPU. Even a 2× im
 
 ### `<rank>` field
 
-**Required at runtime** (the controller rejects requests without it). Sets the preemption tier for the scan task. Default: `2` (above AnalysisApp at rank 1, preempted by nothing at rank 3+).
+Sets the preemption tier for SCAN tasks submitted to the controller. The priority hierarchy is:
+
+| Value | Application | Behaviour |
+|-------|-------------|-----------|
+| `1` | **AcquisitionApp** (default) | Lowest — preempted by Ana and DF when they need the SDR |
+| `2` | AnalysisApp | Preempts Acq; preempted by DF |
+| `3` | DfApp | Highest — preempts everything |
+
+All three ranks are configurable in XML so they can be adjusted per-deployment.
+
+### `<scan_device_ids>` field
+
+Optional. Space-separated list of device IDs from `devices.xml`. When set, AcquisitionApp
+spawns one sweep thread per device and scans them all simultaneously, each with its own
+persistent AMQP channel and UDP stream. Empty (default) lets the scheduler assign any free device.
+
+```xml
+<!-- Scan two remote PlutoSDRs in parallel -->
+<scan_device_ids>pluto-0 pluto-1</scan_device_ids>
+```
 
 ### Sweep parameters
 

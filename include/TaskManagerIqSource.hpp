@@ -47,10 +47,12 @@ class TaskManagerIqSource : public IqSource {
 public:
     /**
      * @brief Construct and connect the persistent AMQP channel.
-     * @param cfg  Sweep configuration (AMQP URL, credentials, scan params, etc.).
+     * @param cfg              Sweep configuration (AMQP URL, credentials, scan params, etc.).
+     * @param preferred_device Device ID to request from the controller (empty = any free device).
      * @throws std::runtime_error if the AMQP channel fails to connect within 60 s.
      */
-    explicit TaskManagerIqSource(const SweepConfig& cfg);
+    explicit TaskManagerIqSource(const SweepConfig& cfg,
+                                  std::string preferred_device = "");
     ~TaskManagerIqSource() override;
 
     /**
@@ -77,6 +79,7 @@ public:
 
 private:
     SweepConfig      cfg_;
+    std::string      preferred_device_;  ///< Requested device ID; empty = any.
     int              udp_fd_{-1};        ///< UDP receive socket file descriptor.
     std::string      task_id_;           ///< Controller-assigned task UUID.
     std::atomic<bool> running_{false};

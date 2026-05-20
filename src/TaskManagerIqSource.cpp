@@ -223,7 +223,9 @@ static std::string makeReqId() {
 
 // ── TaskManagerIqSource ───────────────────────────────────────────────────────
 
-TaskManagerIqSource::TaskManagerIqSource(const SweepConfig& cfg) : cfg_(cfg) {
+TaskManagerIqSource::TaskManagerIqSource(const SweepConfig& cfg,
+                                          std::string preferred_device)
+    : cfg_(cfg), preferred_device_(std::move(preferred_device)) {
     pkt_buf_.resize(65536);
     resetAccum();
 
@@ -318,11 +320,12 @@ std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) con
         {"rank",           cfg_.rank},
         {"schedule", {{"mode", "CONTINUOUS"}}},
         {"rf", {
-            {"center_freq_hz",  (cfg_.sweep.start_hz + cfg_.sweep.stop_hz) / 2.0},
-            {"bandwidth_hz",    cfg_.device.bandwidth_hz},
-            {"sample_rate_sps", cfg_.device.sample_rate},
-            {"rx_count",        cfg_.device.rx_channels},
-            {"rx_gain_db",      gains}
+            {"center_freq_hz",    (cfg_.sweep.start_hz + cfg_.sweep.stop_hz) / 2.0},
+            {"bandwidth_hz",      cfg_.device.bandwidth_hz},
+            {"sample_rate_sps",   cfg_.device.sample_rate},
+            {"rx_count",          cfg_.device.rx_channels},
+            {"rx_gain_db",        gains},
+            {"preferred_device",  preferred_device_}
         }},
         {"streaming", streaming_obj},
         {"scan_params", {

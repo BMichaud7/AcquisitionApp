@@ -44,6 +44,11 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         el->QueryIntText(&cfg.rank);
     if (auto* el = opt(root, "analysis_pause_ms"))
         el->QueryIntText(&cfg.analysis_pause_ms);
+    if (auto* el = opt(root, "scan_device_ids")) {
+        std::istringstream ss(el->GetText() ? el->GetText() : "");
+        std::string id;
+        while (ss >> id) cfg.scan_device_ids.push_back(id);
+    }
 
     // ── AMQP ────────────────────────────────────────────────────────────────
     if (auto* amqp = opt(root, "amqp")) {

@@ -1,4 +1,5 @@
 #pragma once
+#include <vector>
 /**
  * @file SweepConfig.hpp
  * @brief Configuration structs for AcquisitionApp, loaded from XML.
@@ -84,11 +85,15 @@ struct ReceiverConfig {
  */
 struct SweepConfig {
     std::string    scanner_id{"scanner-0"}; ///< Identifies this scanner in AMQP messages.
-    int            rank{0};                 ///< Task preemption tier (higher = higher priority).
+    int            rank{1};  ///< Preemption tier: 1=Acq (lowest), 2=Ana, 3=DF (highest).
     /// Milliseconds to sleep after each sweep pass before re-submitting the SCAN task.
     /// Gives AnalysisApp (lower rank) a guaranteed window to grab the SDR.
     /// 0 = disabled (continuous sweep, no analysis window).
     int            analysis_pause_ms{0};
+    /// Device IDs to scan simultaneously. Empty = scheduler picks any free device.
+    /// Set in XML: <scan_device_ids>pluto-0 pluto-1</scan_device_ids>
+    /// AcquisitionApp submits one SCAN task per device and scans them in parallel.
+    std::vector<std::string> scan_device_ids;
     AmqpConfig     amqp;
     DbConfig       db;
     DeviceConfig   device;

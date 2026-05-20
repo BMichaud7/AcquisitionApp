@@ -96,16 +96,34 @@ int main(int argc, char* argv[]) {
         if (amqp_ok) amqp->publish(d);
     };
 
-    // ── IQ source: task manager client ───────────────────────────────────
-    acq::TaskManagerIqSource source(cfg);
-    acq::SpectrumScanner scanner(cfg, &source, on_detection);
-    scanner.start();
+    // ── IQ sources + scanners — one per device ────────────────────────────
+    // scan_device_ids empty → one scanner, scheduler picks any free device.
+    // scan_device_ids set  → one scanner per device, all run in parallel.
+    // Rank 1 (lowest) ensures AnalysisApp (2) and DfApp (3) can preempt.
+    std::vector<std::unique_ptr<acq::TaskManagerIqSource>> sources;
+    std::vector<std::unique_ptr<acq::SpectrumScanner>>     scanners;
+
+    auto& dev_ids = cfg.scan_device_ids;
+    if (dev_ids.empty()) {
+        spdlog::info("Devices: any (scheduler assigns)");
+        sources.push_back(std::make_unique<acq::TaskManagerIqSource>(cfg));
+        scanners.push_back(std::make_unique<acq::SpectrumScanner>(cfg, sources.back().get(), on_detection));
+    } else {
+        spdlog::info("Devices: {} (scanning all simultaneously)", dev_ids.size());
+        for (const auto& dev_id : dev_ids) {
+            spdlog::info("  → {}", dev_id);
+            sources.push_back(std::make_unique<acq::TaskManagerIqSource>(cfg, dev_id));
+            scanners.push_back(std::make_unique<acq::SpectrumScanner>(cfg, sources.back().get(), on_detection));
+        }
+    }
+
+    for (auto& s : scanners) s->start();
 
     spdlog::info("Running — Ctrl+C to stop");
     while (g_running) std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     spdlog::info("Stopping...");
-    scanner.stop();
+    for (auto& s : scanners) s->stop();
     amqp.reset();
     db.reset();
     spdlog::info("Shutdown complete");

@@ -276,13 +276,13 @@ TEST_F(SweepConfigTest, ExplicitScannerIdOverridesDefault) {
     EXPECT_EQ(cfg.scanner_id, "my-scanner");
 }
 
-TEST_F(SweepConfigTest, RankDefaultsToZero) {
+TEST_F(SweepConfigTest, RankDefaultsToOne) {
     auto cfg = parse(R"(
         <sdr_acquisition>
           <device><driver>rtlsdr</driver><uri></uri></device>
           <sweep><start_hz>100000000</start_hz><stop_hz>200000000</stop_hz></sweep>
         </sdr_acquisition>)");
-    EXPECT_EQ(cfg.rank, 0);
+    EXPECT_EQ(cfg.rank, 1);
 }
 
 TEST_F(SweepConfigTest, ExplicitRankIsLoaded) {
