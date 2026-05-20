@@ -1,0 +1,240 @@
+# ════════════════════════════════════════════════════════════════════════
+#  AcquisitionApp — Kubernetes / k3s Manifests
+#
+#  One DaemonSet pod per SDR node (USB PlutoSDR physically attached).
+#  Uses hostNetwork + privileged to access the USB device.
+#
+#  Prerequisites:
+#    1. Label each SDR-attached node:
+#         kubectl label node <node-name> sdr-usb=true
+#    2. Create credentials Secret (see below).
+#    3. Apply:
+#         kubectl apply -f deploy/k8s/deployment.yaml
+#
+#  Update config only:
+#    kubectl create configmap acquisition-config -n sdr-system \
+#      --from-file=scanner.xml=config/scanner.xml \
+#      --dry-run=client -o yaml | kubectl apply -f -
+#    kubectl rollout restart daemonset/sdr-acquisition -n sdr-system
+# ════════════════════════════════════════════════════════════════════════
+
+---
+# ── ConfigMap: scanner.xml ─────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acquisition-config
+  namespace: sdr-system
+  labels:
+    app: sdr-acquisition
+data:
+  scanner.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <sdr_acquisition version="2.0">
+      <scanner_id>scanner-0</scanner_id>
+
+      <amqp>
+        <url>amqp://activemq-service.sdr-system.svc.cluster.local:5672</url>
+        <username>sdr_ctrl</username>
+        <password>CHANGE_ME</password>
+        <detection_topic>rf.detections</detection_topic>
+        <task_request_queue>sdr.task.request</task_request_queue>
+        <task_response_queue>sdr.task.response</task_response_queue>
+        <reconnect_interval_sec>5</reconnect_interval_sec>
+      </amqp>
+
+      <database>
+        <host>postgres-service.sdr-system.svc.cluster.local</host>
+        <port>5432</port>
+        <name>sdr_scanner</name>
+        <user>sdr</user>
+        <password>CHANGE_ME</password>
+      </database>
+
+      <device>
+        <rx_channels>1</rx_channels>
+        <sample_rate_sps>20000000</sample_rate_sps>
+        <rx_gain_db>50</rx_gain_db>
+        <bandwidth_hz>20000000</bandwidth_hz>
+      </device>
+
+      <sweep>
+        <start_hz>80000000</start_hz>
+        <stop_hz>1000000000</stop_hz>
+        <dwell_samples>131072</dwell_samples>
+        <fft_size>8192</fft_size>
+        <usable_bw_fraction>0.80</usable_bw_fraction>
+        <threshold_db>6.0</threshold_db>
+        <min_signal_bw_hz>12000</min_signal_bw_hz>
+        <dc_guard_hz>75000</dc_guard_hz>
+        <cfar_guard_bins>8</cfar_guard_bins>
+        <cfar_ref_bins>32</cfar_ref_bins>
+        <min_papr_db>3.0</min_papr_db>
+        <noise_floor_alpha>0.08</noise_floor_alpha>
+        <analysis_pause_ms>3000</analysis_pause_ms>
+      </sweep>
+
+      <rank>2</rank>
+
+      <receiver>
+        <local_ip>0.0.0.0</local_ip>
+        <port>0</port>
+      </receiver>
+    </sdr_acquisition>
+
+---
+# ── DaemonSet ──────────────────────────────────────────────────────────
+# DaemonSet (not Deployment) because each SDR-labelled node runs exactly
+# one scanner pod — USB device ownership is exclusive per node.
+# strategy Recreate ensures the old pod drops the USB device before the
+# new one claims it during rollouts.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sdr-acquisition
+  namespace: sdr-system
+  labels:
+    app: sdr-acquisition
+    version: "1.2.0"
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1  # update one node at a time
+  selector:
+    matchLabels:
+      app: sdr-acquisition
+  template:
+    metadata:
+      labels:
+        app: sdr-acquisition
+        version: "1.2.0"
+    spec:
+      # Only schedule on nodes with a USB PlutoSDR attached.
+      nodeSelector:
+        sdr-usb: "true"
+
+      # hostNetwork: AcquisitionApp binds UDP port 0 (OS-assigned) to receive
+      # IQ from SdrResourceManager.  The pre-bound port is sent in the task
+      # request so the controller knows where to stream.  hostNetwork avoids
+      # NAT between the controller and the scanner pod.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+
+      terminationGracePeriodSeconds: 15
+
+      containers:
+        - name: sdr-acquisition
+          image: ghcr.io/bmichaud7/sdr-acquisition:1.2.0
+          imagePullPolicy: Always
+
+          env:
+            - name: SDR_CONFIG_PATH
+              value: /etc/sdr-acquisition/scanner.xml
+            - name: SDR_LOG_LEVEL
+              value: info
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: AMQP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sdr-credentials
+                  key: amqp-password
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sdr-credentials
+                  key: db-password
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/sdr-acquisition
+              readOnly: true
+            # FFTW wisdom: persisted across restarts on the same node.
+            - name: fftw-wisdom
+              mountPath: /var/cache/sdr-acquisition
+            # USB bus: gives the container access to all USB devices on the host.
+            # The sdr-acquisition binary uses SoapySDR with uri=usb: to find
+            # the PlutoSDR automatically.
+            - name: usb
+              mountPath: /dev/bus/usb
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "4"
+              memory: "1Gi"
+
+          # PlutoSDR USB access requires privileged mode.
+          # CAP_NET_ADMIN is for large SO_RCVBUF (>rmem_default) — needed to
+          # buffer the full sweep while waiting for TASK_ACCEPTED.
+          securityContext:
+            privileged: true
+
+          livenessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "kill -0 1"]
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+
+      volumes:
+        - name: config
+          configMap:
+            name: acquisition-config
+            items:
+              - key: scanner.xml
+                path: scanner.xml
+        - name: fftw-wisdom
+          hostPath:
+            path: /var/cache/sdr-acquisition
+            type: DirectoryOrCreate
+        - name: usb
+          hostPath:
+            path: /dev/bus/usb
+            type: Directory
+
+---
+# ── NetworkPolicy ──────────────────────────────────────────────────────
+# Acquisition pods:
+#   Egress: AMQP to broker, postgres, DNS
+#   Ingress: not needed (hostNetwork pod initiates all connections)
+# Note: with hostNetwork=true these rules apply to the host network
+# namespace — set to permissive if your CNI enforces them strictly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sdr-acquisition-netpol
+  namespace: sdr-system
+spec:
+  podSelector:
+    matchLabels:
+      app: sdr-acquisition
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: activemq
+      ports:
+        - port: 5672
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
