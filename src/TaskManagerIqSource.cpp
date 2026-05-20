@@ -153,9 +153,11 @@ void TaskManagerIqSource::bindUdp(uint16_t port) {
     struct timeval tv = {.tv_sec = 0, .tv_usec = 100'000};  // 100 ms
     setsockopt(udp_fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    // Enlarge kernel receive buffer to absorb bursts at 20 MSPS (160 MB/s).
-    // The kernel doubles the value internally, so this requests ~32 MB effective.
-    int rcvbuf = 16 * 1024 * 1024;
+    // Enlarge kernel receive buffer to absorb the full sweep while waiting for
+    // TASK_ACCEPTED.  At 20 MSPS (160 MB/s) a 920 MHz sweep takes ~373ms = ~59 MB.
+    // Requesting 50 MB → kernel allocates min(2×50 MB, rmem_max) ≈ 100 MB effective,
+    // which is enough to buffer the complete sweep before we start draining.
+    int rcvbuf = 50 * 1024 * 1024;
     if (setsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0)
         spdlog::warn("[TaskMgrSrc] SO_RCVBUF failed: {}", strerror(errno));
 
