@@ -36,7 +36,7 @@ data:
       <amqp>
         <url>amqp://activemq-service.sdr-system.svc.cluster.local:5672</url>
         <username>sdr_ctrl</username>
-        <password>CHANGE_ME</password>
+        <password>${AMQP_PASSWORD}</password>
         <detection_topic>rf.detections</detection_topic>
         <task_request_queue>sdr.task.request</task_request_queue>
         <task_response_queue>sdr.task.response</task_response_queue>
@@ -48,7 +48,7 @@ data:
         <port>5432</port>
         <name>sdr_scanner</name>
         <user>sdr</user>
-        <password>CHANGE_ME</password>
+        <password>${DB_PASSWORD}</password>
       </database>
 
       <device>
@@ -123,6 +123,38 @@ spec:
 
       terminationGracePeriodSeconds: 15
 
+      # initContainer: substitute ${AMQP_PASSWORD} / ${DB_PASSWORD} into the
+      # ConfigMap XML template and write the result to an emptyDir volume.
+      # The main container reads from that volume, never from the ConfigMap directly.
+      initContainers:
+        - name: render-config
+          image: python:3.12-alpine
+          command:
+            - python3
+            - -c
+            - |
+              import os, string
+              tmpl = open('/tmpl/scanner.xml').read()
+              out  = string.Template(tmpl).safe_substitute(os.environ)
+              open('/out/scanner.xml', 'w').write(out)
+          env:
+            - name: AMQP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sdr-credentials
+                  key: amqp-password
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sdr-credentials
+                  key: db-password
+          volumeMounts:
+            - name: config-template
+              mountPath: /tmpl
+              readOnly: true
+            - name: config-rendered
+              mountPath: /out
+
       containers:
         - name: sdr-acquisition
           image: ghcr.io/bmichaud7/sdr-acquisition:1.2.0
@@ -137,19 +169,9 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            - name: AMQP_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: sdr-credentials
-                  key: amqp-password
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: sdr-credentials
-                  key: db-password
 
           volumeMounts:
-            - name: config
+            - name: config-rendered
               mountPath: /etc/sdr-acquisition
               readOnly: true
             # FFTW wisdom: persisted across restarts on the same node.
@@ -183,12 +205,11 @@ spec:
             failureThreshold: 3
 
       volumes:
-        - name: config
+        - name: config-template
           configMap:
             name: acquisition-config
-            items:
-              - key: scanner.xml
-                path: scanner.xml
+        - name: config-rendered
+          emptyDir: {}
         - name: fftw-wisdom
           hostPath:
             path: /var/cache/sdr-acquisition
