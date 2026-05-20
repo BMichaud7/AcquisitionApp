@@ -1,4 +1,5 @@
 #include "AmqpPublisher.hpp"
+#include <sdr/Base64.hpp>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <chrono>
@@ -83,14 +84,18 @@ proton::message AmqpPublisher::makeMessage(const Detection& d) const {
         {"center_freq_hz",  d.center_freq_hz},
         {"bandwidth_hz",    d.bandwidth_hz},
         {"power_db",        d.power_db},
+        {"snr_db",          d.snr_db},
         {"channel",         d.channel}
     };
 
-    // Embed IQ snapshot for zero-acquisition ONNX fast-path in AnalysisApp.
-    // 1 024 complex samples × 2 floats = 2 048 float values ≈ 16 KB as JSON.
-    if (!d.iq_snapshot.empty()) {
-        body["iq_snapshot"]               = d.iq_snapshot;
-        body["snapshot_sample_rate_sps"]  = d.snapshot_sample_rate_sps;
+    // IQ snapshot: base64-encoded raw float32 bytes (~11 KB) instead of a
+    // JSON float array (~28 KB). Receivers decode with sdr::base64::decodeFloats().
+    // Backward-compatible decoders fall back to "iq_snapshot" (JSON array).
+    if (d.iq_snapshot && !d.iq_snapshot->empty()) {
+        body["iq_snapshot_b64"] = sdr::base64::encode(
+            d.iq_snapshot->data(),
+            d.iq_snapshot->size() * sizeof(float));
+        body["snapshot_sample_rate_sps"] = d.snapshot_sample_rate_sps;
     }
 
     proton::message msg;

@@ -134,19 +134,17 @@ std::vector<Detection> SpectrumScanner::processDwell(
         }
     }
 
-    // ── Step 4: Build IQ snapshot for the ONNX fast path ─────────────────────
-    // All detections from this dwell share the same raw IQ, so we build the
-    // snapshot once and embed it in every Detection we emit.  The snapshot is
-    // 1 024 complex samples (interleaved I,Q,I,Q,...) at the scan sample rate.
-    // AnalysisApp uses it to run ONNX immediately without re-acquiring the SDR.
+    // ── Step 4: Build IQ snapshot for ONNX fast-path / MUSIC ─────────────────
+    // Built once per dwell and shared across all Detection objects via shared_ptr
+    // (zero-copy: N detections → one allocation instead of N × 8 KB copies).
     static constexpr int SNAP_SAMPLES = 1024;
-    std::vector<float> dwell_snapshot;
+    auto dwell_snapshot = std::make_shared<std::vector<float>>();
     {
         int snap_n = std::min(SNAP_SAMPLES, (int)samples.size());
-        dwell_snapshot.reserve(snap_n * 2);
+        dwell_snapshot->reserve(snap_n * 2);
         for (int i = 0; i < snap_n; ++i) {
-            dwell_snapshot.push_back(samples[i].real());
-            dwell_snapshot.push_back(samples[i].imag());
+            dwell_snapshot->push_back(samples[i].real());
+            dwell_snapshot->push_back(samples[i].imag());
         }
     }
 
@@ -192,7 +190,8 @@ std::vector<Detection> SpectrumScanner::processDwell(
         d.power_db                   = s.peak_db;
         d.scanner_id                 = cfg_.scanner_id;
         d.channel                    = ch;
-        d.iq_snapshot                = dwell_snapshot;   // shared — copy is cheap (16 KB)
+        d.snr_db                     = s.peak_db - s.mean_db;  // PAPR proxy
+        d.iq_snapshot                = dwell_snapshot;          // shared_ptr, zero-copy
         d.snapshot_sample_rate_sps   = cfg_.device.sample_rate;
         out.push_back(d);
     }
