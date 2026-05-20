@@ -9,20 +9,43 @@ using namespace std::chrono;
 DetectionDb::DetectionDb(const std::string& conn_str, int batch_size, int flush_interval_ms)
     : conn_(conn_str), batch_size_(batch_size), flush_interval_ms_(flush_interval_ms)
 {
-    // Ensure table exists (idempotent — schema/init.sql should be run first)
     pqxx::work txn(conn_);
+    // Ensure the shared signals table exists (schema/init.sql should be run first,
+    // but this guard prevents a hard crash if it hasn't been).
     txn.exec(R"(
-        CREATE TABLE IF NOT EXISTS detections (
-            id            BIGSERIAL PRIMARY KEY,
-            detected_at   TIMESTAMPTZ NOT NULL,
-            center_freq_hz BIGINT     NOT NULL,
-            bandwidth_hz  INTEGER     NOT NULL,
-            power_db      REAL        NOT NULL,
-            scanner_id    TEXT        NOT NULL,
-            channel       SMALLINT    NOT NULL
+        CREATE TABLE IF NOT EXISTS signals (
+            id              BIGSERIAL        PRIMARY KEY,
+            first_seen      TIMESTAMPTZ      NOT NULL DEFAULT now(),
+            last_seen       TIMESTAMPTZ      NOT NULL DEFAULT now(),
+            freq_hz         DOUBLE PRECISION NOT NULL,
+            freq_mhz        DOUBLE PRECISION NOT NULL,
+            bandwidth_hz    DOUBLE PRECISION,
+            power_db        REAL,
+            snr_db          REAL,
+            scanner_id      TEXT             NOT NULL DEFAULT '',
+            channel         SMALLINT         NOT NULL DEFAULT 0,
+            modulation      TEXT             NOT NULL DEFAULT '',
+            mod_class       TEXT             NOT NULL DEFAULT '',
+            is_ofdm         BOOLEAN          NOT NULL DEFAULT false,
+            is_burst        BOOLEAN          NOT NULL DEFAULT false,
+            is_fhss         BOOLEAN          NOT NULL DEFAULT false,
+            symbol_rate_sps DOUBLE PRECISION,
+            bit_rate_bps    DOUBLE PRECISION,
+            hypothesis      TEXT             NOT NULL DEFAULT '',
+            hyp_category    TEXT             NOT NULL DEFAULT '',
+            hyp_confidence  REAL             DEFAULT 0,
+            classified      BOOLEAN          NOT NULL DEFAULT false,
+            rule_confidence REAL             DEFAULT 0,
+            onnx_used       BOOLEAN          NOT NULL DEFAULT false,
+            onnx_confidence REAL             DEFAULT 0,
+            fast_path       BOOLEAN          NOT NULL DEFAULT false,
+            reject_reason   TEXT             NOT NULL DEFAULT '',
+            hits            INTEGER          NOT NULL DEFAULT 1
         );
-        CREATE INDEX IF NOT EXISTS idx_detections_time ON detections (detected_at);
-        CREATE INDEX IF NOT EXISTS idx_detections_freq ON detections (center_freq_hz);
+        CREATE INDEX IF NOT EXISTS idx_signals_freq    ON signals (freq_hz);
+        CREATE INDEX IF NOT EXISTS idx_signals_time    ON signals (last_seen DESC);
+        CREATE INDEX IF NOT EXISTS idx_signals_unclass ON signals (classified, last_seen DESC)
+            WHERE classified = false;
     )");
     txn.commit();
 
@@ -87,23 +110,63 @@ void DetectionDb::workerLoop() {
 
 void DetectionDb::flush(std::vector<Detection>& batch) {
     pqxx::work txn(conn_);
+
     for (const auto& d : batch) {
         auto ms = duration_cast<milliseconds>(
             d.timestamp.time_since_epoch()).count();
-        // PostgreSQL to_timestamp() takes Unix seconds as double
-        txn.exec_params(
-            "INSERT INTO detections "
-            "(detected_at, center_freq_hz, bandwidth_hz, power_db, scanner_id, channel) "
-            "VALUES (to_timestamp($1::double precision / 1000.0), $2, $3, $4, $5, $6)",
-            ms,
-            (long long)d.center_freq_hz,
-            (int)d.bandwidth_hz,
-            d.power_db,
-            d.scanner_id,
-            d.channel);
+
+        std::optional<double> bw_opt;
+        if (d.bandwidth_hz > 0) bw_opt = (double)d.bandwidth_hz;
+
+        // Find a recent signal at the same frequency (±10 kHz) with similar
+        // bandwidth (±50%).  Matches classified OR unclassified rows — if the
+        // signal is already classified we still want to update last_seen/power.
+        auto existing = txn.exec_params(
+            "SELECT id FROM signals "
+            "WHERE abs(freq_hz - $1) < 10000 "
+            "  AND ($2::double precision IS NULL OR bandwidth_hz IS NULL "
+            "       OR abs(bandwidth_hz - $2) / GREATEST(bandwidth_hz, 1000.0) < 0.5) "
+            "  AND last_seen > now() - interval '10 minutes' "
+            "ORDER BY abs(freq_hz - $1) ASC "
+            "LIMIT 1",
+            (double)d.center_freq_hz,
+            bw_opt);
+
+        if (!existing.empty()) {
+            // Same signal seen again — update last_seen, peak power, hit count.
+            // Don't touch modulation/classification — AnalysisApp owns those.
+            txn.exec_params(
+                "UPDATE signals SET "
+                "  last_seen    = to_timestamp($2::double precision / 1000.0), "
+                "  power_db     = GREATEST(power_db, $3), "
+                "  hits         = hits + 1 "
+                "WHERE id = $1",
+                existing[0][0].as<long long>(),
+                ms,
+                d.power_db);
+        } else {
+            // First time this signal has been seen — insert unclassified row.
+            // AnalysisApp will fill in modulation/classification after IQ collection.
+            txn.exec_params(
+                "INSERT INTO signals "
+                "(first_seen, last_seen, freq_hz, freq_mhz, bandwidth_hz, "
+                " power_db, scanner_id, channel) "
+                "VALUES ("
+                "  to_timestamp($1::double precision / 1000.0), "
+                "  to_timestamp($1::double precision / 1000.0), "
+                "  $2, $3, $4, $5, $6, $7)",
+                ms,
+                (double)d.center_freq_hz,
+                d.center_freq_hz / 1e6,
+                bw_opt,
+                d.power_db,
+                d.scanner_id,
+                d.channel);
+        }
     }
+
     txn.commit();
-    spdlog::debug("[DetectionDb] wrote {} detections", batch.size());
+    spdlog::debug("[DetectionDb] upserted {} detections", batch.size());
 }
 
 } // namespace acq

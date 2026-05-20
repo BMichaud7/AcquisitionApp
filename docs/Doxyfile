@@ -1,0 +1,34 @@
+PROJECT_NAME           = "AcquisitionApp"
+PROJECT_NUMBER         = "1.2"
+PROJECT_BRIEF          = "Spectrum scanner — submits SCAN tasks, detects signals via FFT/CFAR"
+PROJECT_LOGO           =
+OUTPUT_DIRECTORY       = docs
+INPUT                  = include/ src/
+RECURSIVE              = YES
+FILE_PATTERNS          = *.hpp *.cpp *.h
+EXCLUDE_PATTERNS       = */build/* */.git/* */tests/*
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = html
+HTML_TIMESTAMP         = NO
+GENERATE_TREEVIEW      = YES
+TREEVIEW_WIDTH         = 250
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+BUILTIN_STL_SUPPORT    = YES
+DISTRIBUTE_GROUP_DOC   = YES
+HAVE_DOT               = NO
+SOURCE_BROWSER         = YES
+STRIP_CODE_COMMENTS    = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+GENERATE_TODOLIST      = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_NO_PARAMDOC       = YES
+QUIET                  = NO
+WARNINGS               = YES
+
+# SdrTaskApi headers are referenced — add sibling include path so Doxygen
+# can resolve cross-references without needing SdrTaskApi built.
+INCLUDE_PATH           = ../SdrTaskApi/include

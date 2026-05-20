@@ -1,4 +1,26 @@
 #pragma once
+/**
+ * @file FftProcessor.hpp
+ * @brief Welch-averaged FFT + CA-CFAR signal detector for one dwell.
+ *
+ * Detection pipeline applied to each dwell of CF32 IQ samples:
+ * 1. **Welch averaging** — 50%-overlapping frames, each DC-removed,
+ *    IQ-imbalance corrected (Gram-Schmidt), and Blackman-Harris windowed
+ *    before FFT.  All frame power spectra are averaged linearly then
+ *    converted to dBFS.
+ * 2. **CA-CFAR** — per-bin local noise estimated via O(N) prefix sum
+ *    over @p cfar_ref reference cells (skipping @p cfar_guard guard cells).
+ * 3. **PAPR filter** — multi-bin runs must have peak-to-mean ratio ≥
+ *    @p min_papr_db; rejects flat noise bumps.
+ * 4. **Sub-bin interpolation** — 3-point parabolic fit on the peak bin
+ *    gives Signal::center_bin with ~1–2 kHz accuracy at 20 MSPS / 4096 bins.
+ *
+ * **IQ imbalance correction** — amplitude and phase parameters are estimated
+ * once per dwell using all samples, then applied per-frame via Gram-Schmidt
+ * orthogonalisation.  Reduces the AD9361 mirror image from ~25 dBc to ~55 dBc.
+ *
+ * **Thread safety** — one instance per thread (owns FFTW plan and scratch buffers).
+ */
 #include <complex>
 #include <vector>
 #include <cstdint>
@@ -6,44 +28,69 @@
 
 namespace acq {
 
-// Processes one dwell of CF32 samples and returns detected signals.
-//
-// Detection pipeline:
-//   1. Welch averaging (50% overlap frames) → power_db_ in dBFS
-//      Each frame: DC removal + IQ imbalance correction (Gram-Schmidt) + BH window
-//   2. CA-CFAR per-bin local noise estimate (O(N) via prefix sum)
-//   3. PAPR filter: multi-bin runs must have a clear spectral peak
-//   4. Sub-bin parabolic interpolation of peak bin (Signal::center_bin)
-//
-// IQ imbalance correction: parameters estimated once per dwell from all samples,
-// applied per-frame. Cancels the AD9361 mirror image (~25 dBc without correction
-// → ~55 dBc after), eliminating a major source of false detections.
-//
-// Thread-compatible: one instance per thread / channel.
+/**
+ * @brief FFT-based signal detector for one IQ dwell.
+ *
+ * Instantiate once per processing thread.  Call computeSpectrum() then
+ * detectFromSpectrum() on each dwell, or use the convenience detect() wrapper.
+ */
 class FftProcessor {
 public:
+    /**
+     * @brief Describes one detected signal group in the power spectrum.
+     */
     struct Signal {
-        int   start_bin;    // first bin of the detected group (fftshift coords)
-        int   end_bin;      // last bin of the detected group, inclusive
-        float peak_db;      // peak power in dBFS
-        float mean_db;      // mean power of the group in dBFS
-        float center_bin;   // sub-bin interpolated peak position (fftshift coords)
+        int   start_bin;    ///< First bin of the run (fftshift coordinates).
+        int   end_bin;      ///< Last bin of the run, inclusive (fftshift coordinates).
+        float peak_db;      ///< Peak power in the run (dBFS).
+        float mean_db;      ///< Mean power of the run (dBFS).
+        float center_bin;   ///< Sub-bin interpolated peak position (fftshift coordinates).
     };
 
-    // cfar_guard: guard cells each side of test cell (excluded from local noise estimate)
-    // cfar_ref:   reference cells each side used to average local noise
+    /**
+     * @brief Construct an FftProcessor.
+     * @param fft_size    FFT size (must be a power of 2, ≥ 64).
+     * @param cfar_guard  Guard cells each side of the test bin (excluded from
+     *                    the local noise average to avoid signal self-noise).
+     * @param cfar_ref    Reference cells each side for the CA-CFAR noise estimate.
+     */
     explicit FftProcessor(int fft_size, int cfar_guard = 8, int cfar_ref = 32);
     ~FftProcessor();
 
     FftProcessor(const FftProcessor&)            = delete;
     FftProcessor& operator=(const FftProcessor&) = delete;
 
-    // Run Welch averaging on [samples, samples+n_samples); populates powerDb().
+    /**
+     * @brief Run Welch averaging on @p n_samples IQ samples.
+     *
+     * Populates powerDb().  Must be called before detectFromSpectrum().
+     *
+     * @param samples   Pointer to interleaved CF32 IQ samples.
+     * @param n_samples Total sample count (must be ≥ fft_size()).
+     */
     void computeSpectrum(const std::complex<float>* samples, int n_samples);
 
-    // Detect signals using the spectrum last computed by computeSpectrum().
-    // hist_floor: optional per-bin historical noise floor — raises local noise
-    //             estimate in persistently noisy bins.
+    /**
+     * @brief Detect signals using the spectrum produced by computeSpectrum().
+     *
+     * @param threshold_db      Detection threshold above local CA-CFAR noise (dB).
+     * @param usable_fraction   Fraction of bins examined; edge bins are discarded
+     *                          to avoid roll-off artefacts (e.g. 0.80).
+     * @param sample_rate       Sample rate of the dwell (samples/s); used for
+     *                          Hz-to-bin and bin-to-Hz conversions.
+     * @param min_signal_bw_hz  Minimum run width to be reported (Hz); single-bin
+     *                          spurs narrower than this are discarded.
+     * @param dc_guard_hz       Bins within this range of DC (0 Hz) are blanked to
+     *                          suppress LO leakage.  Pass 0 to disable.
+     * @param min_papr_db       Minimum peak-to-mean power ratio (dB) for multi-bin
+     *                          runs.  Flat noise bumps below this threshold are
+     *                          discarded.
+     * @param hist_floor        Optional per-bin historical noise floor (same length
+     *                          as fft_size).  If provided, the local noise estimate
+     *                          is raised to max(cfar, hist_floor[bin]) to suppress
+     *                          persistent interference.  Pass nullptr to disable.
+     * @return Detected signal groups, sorted by peak_db descending.
+     */
     std::vector<Signal> detectFromSpectrum(
         float    threshold_db,
         float    usable_fraction,
@@ -53,7 +100,17 @@ public:
         float    min_papr_db  = 3.0f,
         const std::vector<float>* hist_floor = nullptr);
 
-    // Convenience: computeSpectrum + detectFromSpectrum in one call.
+    /**
+     * @brief Convenience: computeSpectrum() + detectFromSpectrum() in one call.
+     * @param samples       Pointer to interleaved CF32 IQ samples.
+     * @param n_samples     Total sample count.
+     * @param threshold_db  Detection threshold above CA-CFAR noise (dB).
+     * @param usable_fraction Fraction of bins examined.
+     * @param sample_rate   Sample rate (samples/s).
+     * @param min_signal_bw_hz Minimum signal bandwidth (Hz).
+     * @param dc_guard_hz   DC guard zone (Hz).  0 = disabled.
+     * @return Detected signal groups.
+     */
     std::vector<Signal> detect(
         const std::complex<float>* samples,
         int      n_samples,
@@ -63,11 +120,28 @@ public:
         uint32_t min_signal_bw_hz,
         uint32_t dc_guard_hz = 0);
 
+    /// @brief Power spectrum in dBFS after the last computeSpectrum() call.
     const std::vector<float>& powerDb() const { return power_db_; }
 
+    /**
+     * @brief Convert an integer bin index to Hz (fftshift coordinates).
+     * @param bin        Bin index in fftshift layout.
+     * @param sample_rate Sample rate (samples/s).
+     * @param center_hz  LO centre frequency (Hz).
+     * @return Absolute frequency in Hz.
+     */
     uint64_t binToHz(int   bin, double sample_rate, uint64_t center_hz) const;
+
+    /**
+     * @brief Convert a fractional (sub-bin) index to Hz (fftshift coordinates).
+     * @param bin        Sub-bin position from parabolic interpolation.
+     * @param sample_rate Sample rate (samples/s).
+     * @param center_hz  LO centre frequency (Hz).
+     * @return Absolute frequency in Hz.
+     */
     uint64_t binToHz(float bin, double sample_rate, uint64_t center_hz) const;
 
+    /// @brief FFT size this processor was constructed with.
     int fft_size() const { return fft_size_; }
 
 private:
@@ -78,11 +152,11 @@ private:
     fftwf_complex* out_{nullptr};
     fftwf_plan     plan_{nullptr};
 
-    std::vector<float> window_;       // Blackman-Harris coefficients
-    std::vector<float> linear_acc_;   // Welch linear-power accumulator
-    std::vector<float> power_db_;     // averaged power in dBFS after Welch
-    std::vector<float> scratch_;      // median sort scratch — no per-call alloc
-    std::vector<float> psum_;         // CFAR prefix sum — pre-allocated, no per-dwell alloc
+    std::vector<float> window_;       ///< Blackman-Harris window coefficients.
+    std::vector<float> linear_acc_;   ///< Welch linear-power accumulator.
+    std::vector<float> power_db_;     ///< Averaged power in dBFS (fftshift layout).
+    std::vector<float> scratch_;      ///< Scratch buffer — no per-call allocation.
+    std::vector<float> psum_;         ///< CFAR prefix sum — pre-allocated.
 
     void  accumFrame(const std::complex<float>* src);
     float estimateNoise(int start_bin, int end_bin);
