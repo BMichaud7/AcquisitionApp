@@ -161,11 +161,11 @@ TEST_F(SpectrumScannerTest, DetectionHasIqSnapshot) {
 
     ASSERT_TRUE(got.load()) << "No detection received within timeout";
     // Must be non-empty, even, and at most 2048 (1024 complex samples)
-    EXPECT_FALSE(captured.iq_snapshot.empty())
+    ASSERT_TRUE(captured.iq_snapshot && !captured.iq_snapshot->empty())
         << "IQ snapshot must be present on every confirmed detection";
-    EXPECT_EQ(captured.iq_snapshot.size() % 2, 0u)
+    EXPECT_EQ(captured.iq_snapshot->size() % 2, 0u)
         << "Snapshot size must be even (interleaved I,Q pairs)";
-    EXPECT_LE(captured.iq_snapshot.size(), 2048u)
+    EXPECT_LE(captured.iq_snapshot->size(), 2048u)
         << "Snapshot must not exceed 1 024 complex samples";
     EXPECT_GT(captured.snapshot_sample_rate_sps, 0.0)
         << "snapshot_sample_rate_sps must be positive";
@@ -207,10 +207,10 @@ TEST_F(SpectrumScannerTest, SnapshotContainsNonZeroSamples) {
     scanner.stop();
 
     ASSERT_TRUE(got.load());
-    ASSERT_FALSE(captured.iq_snapshot.empty());
+    ASSERT_TRUE(captured.iq_snapshot && !captured.iq_snapshot->empty());
     float rms = 0.f;
-    for (float v : captured.iq_snapshot) rms += v * v;
-    rms = std::sqrt(rms / (float)captured.iq_snapshot.size());
+    for (float v : *captured.iq_snapshot) rms += v * v;
+    rms = std::sqrt(rms / (float)captured.iq_snapshot->size());
     EXPECT_GT(rms, 1e-6f) << "Snapshot should contain non-zero signal samples";
 }
 
