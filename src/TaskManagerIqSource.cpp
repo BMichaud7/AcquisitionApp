@@ -14,6 +14,8 @@
 #include <proton/source_options.hpp>
 #include <proton/target_options.hpp>
 #include <proton/delivery.hpp>
+#include <proton/reconnect_options.hpp>
+#include <proton/transport.hpp>
 #include <proton/work_queue.hpp>
 #include <proton/symbol.hpp>
 #include <sys/socket.h>
@@ -37,100 +39,177 @@ using IqPacketHeader     = sdr::IqPacketHeader;
 static constexpr uint32_t IQ_MAGIC          = sdr::IQ_PACKET_MAGIC;
 static constexpr uint8_t  FLAG_DWELL_CHANGE = sdr::IQ_FLAG_DWELL_CHANGE;
 
-// ── Minimal synchronous AMQP helper ──────────────────────────────────────────
-// Sends one message and optionally waits for a correlated reply.
+// ── Persistent AMQP task channel ─────────────────────────────────────────────
+// Maintains one long-lived connection to the broker.  The ~30 s Artemis
+// subscription-settlement cost is paid ONCE when the channel first connects.
+// All subsequent exchange() calls return in < 1 s.
+//
+// Thread model: proton runs on an internal background thread.  exchange() and
+// send() are called from the sweepLoop thread; they post work to the proton
+// thread via work_queue and then block on a condition variable.
 
 struct AmqpResponse {
     bool        received{false};
     std::string body;
 };
 
-class SyncAmqpExchange : public proton::messaging_handler {
+class TaskAmqpChannel : public proton::messaging_handler {
 public:
-    SyncAmqpExchange(std::string url, std::string username, std::string password,
-                     std::string send_addr, std::string recv_addr,
-                     std::string msg_body, std::string correlation_id, int timeout_sec)
-        : url_(std::move(url)), username_(std::move(username)), password_(std::move(password)),
-          send_addr_(std::move(send_addr)),
-          recv_addr_(std::move(recv_addr)), body_(std::move(msg_body)),
-          corr_id_(std::move(correlation_id)), timeout_sec_(timeout_sec) {}
+    TaskAmqpChannel(std::string url, std::string user, std::string pass,
+                    std::string req_queue, std::string resp_queue)
+        : url_(std::move(url)), user_(std::move(user)), pass_(std::move(pass)),
+          req_queue_(std::move(req_queue)), resp_queue_(std::move(resp_queue))
+    {}
 
-    AmqpResponse run() {
-        proton::container c(*this);
-        // Schedule a timeout to prevent indefinite blocking
-        std::thread t([&c, this]{
-            std::this_thread::sleep_for(std::chrono::seconds(timeout_sec_));
-            c.stop();
-        });
-        c.run();
-        t.join();
-        return result_;
+    ~TaskAmqpChannel() { stop(); }
+
+    // Start the background thread and block until sender + receiver are open.
+    void start(int connect_timeout_ms = 60000) {
+        container_ = std::make_unique<proton::container>(*this);
+        thread_ = std::thread([this]{ container_->run(); });
+        std::unique_lock<std::mutex> lk(mu_);
+        ready_cv_.wait_for(lk, std::chrono::milliseconds(connect_timeout_ms),
+                           [this]{ return ready_ || stopped_; });
+        if (!ready_)
+            spdlog::warn("[TaskAmqpChannel] not ready after {}ms", connect_timeout_ms);
     }
 
+    void stop() {
+        if (container_) {
+            if (wq_)
+                wq_->add([this]{ sender_.connection().close(); });
+            if (thread_.joinable()) thread_.join();
+            container_.reset();
+        }
+    }
+
+    // Send msg_body and wait for a response matching corr_id.
+    AmqpResponse exchange(const std::string& msg_body, const std::string& corr_id,
+                          int timeout_ms = 30000) {
+        {
+            std::unique_lock<std::mutex> lk(mu_);
+            if (!ready_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms),
+                                    [this]{ return ready_; })) {
+                spdlog::warn("[TaskAmqpChannel] not ready for exchange");
+                return {};
+            }
+            pending_corr_  = corr_id;
+            pending_result_ = {};
+        }
+        wq_->add([this, msg_body]() mutable {
+            proton::message msg;
+            msg.body(msg_body);
+            msg.content_type("application/json");
+            msg.reply_to(reply_addr_);
+            if (sender_ && sender_.credit() > 0)
+                sender_.send(msg);
+            else
+                spdlog::warn("[TaskAmqpChannel] no credit — message dropped");
+        });
+        std::unique_lock<std::mutex> lk(mu_);
+        result_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms),
+                            [this]{ return pending_result_.received; });
+        return pending_result_;
+    }
+
+    // Fire-and-forget send (for TASK_STOP).
+    void send(const std::string& msg_body) {
+        {
+            std::unique_lock<std::mutex> lk(mu_);
+            if (!ready_) return;
+        }
+        wq_->add([this, msg_body]() mutable {
+            proton::message msg;
+            msg.body(msg_body);
+            msg.content_type("application/json");
+            sender_.send(msg);
+        });
+    }
+
+    // proton callbacks ─────────────────────────────────────────────────────────
     void on_container_start(proton::container& c) override {
         proton::connection_options opts;
-        if (!username_.empty()) {
+        if (!user_.empty()) {
             opts.sasl_allowed_mechs("PLAIN");
             opts.sasl_allow_insecure_mechs(true);
-            opts.user(username_).password(password_);
+            opts.user(user_).password(pass_);
         } else {
             opts.sasl_allowed_mechs("ANONYMOUS");
         }
+        proton::reconnect_options ropts;
+        ropts.delay(proton::duration(2000));
+        ropts.max_delay(proton::duration(30000));
+        ropts.max_attempts(0);
+        opts.reconnect(ropts);
         c.connect(url_, opts);
     }
-    void on_connection_open(proton::connection& conn) override {
-        // ANYCAST capabilities: Artemis routes to a proper queue address instead
-        // of defaulting to MULTICAST, which stalls credit propagation for ~30 s.
-        proton::sender_options sopts;
-        sopts.target(proton::target_options().capabilities(
-            {proton::symbol("queue")}));
-        conn.open_sender(send_addr_, sopts);
 
-        if (!recv_addr_.empty()) {
-            proton::receiver_options ropts;
-            ropts.source(proton::source_options().capabilities(
-                {proton::symbol("queue")}));
-            conn.open_receiver(recv_addr_, ropts);
-        }
+    void on_connection_open(proton::connection& conn) override {
+        // Open request sender with ANYCAST so Artemis uses a proper queue.
+        proton::sender_options sopts;
+        sopts.target(proton::target_options().capabilities({proton::symbol("queue")}));
+        sender_ = conn.open_sender(req_queue_, sopts);
+
+        // Dynamic receiver: Artemis assigns a unique temporary address.
+        // Responses from the controller go to reply_to=<this address>.
+        // Because the address is unique per-connection, no competing consumers.
+        proton::receiver_options ropts;
+        ropts.source(proton::source_options().dynamic(true));
+        conn.open_receiver("", ropts);
     }
-    void on_sender_open(proton::sender& s) override {
-        proton::message msg;
-        msg.body(body_);
-        msg.content_type("application/json");
-        // Tell the controller exactly which queue to reply to.
-        // This prevents competing subscribers from consuming each other's
-        // TASK_ACCEPTED messages off the shared response queue.
-        if (!recv_addr_.empty())
-            msg.reply_to(recv_addr_);
-        s.send(msg);
-        if (recv_addr_.empty()) {
-            result_.received = true;
-            s.connection().close();
-        }
+
+    void on_receiver_open(proton::receiver& r) override {
+        reply_addr_ = r.source().address();
+        spdlog::info("[TaskAmqpChannel] connected, reply_to={}", reply_addr_);
+        wq_ = &r.work_queue();
+        std::lock_guard<std::mutex> lk(mu_);
+        ready_ = true;
+        ready_cv_.notify_all();
     }
+
     void on_message(proton::delivery& d, proton::message& msg) override {
-        // Always accept (ACK) messages to avoid stale redelivery across sessions.
         d.accept();
         try {
             std::string b = proton::get<std::string>(msg.body());
             auto j = json::parse(b);
-            // Match by request_id (controller echoes request_id in response)
-            if (j.value("request_id", "") == corr_id_ ||
-                j.value("correlation_id", "") == corr_id_) {
-                result_.received = true;
-                result_.body     = b;
-                d.connection().close();
+            std::lock_guard<std::mutex> lk(mu_);
+            if (!pending_corr_.empty() &&
+                (j.value("request_id", "") == pending_corr_ ||
+                 j.value("correlation_id", "") == pending_corr_)) {
+                pending_result_ = {true, b};
+                pending_corr_.clear();
+                result_cv_.notify_all();
             }
-            // Non-matching messages are acknowledged and discarded (stale responses).
         } catch (...) {}
     }
-    void on_transport_error(proton::transport&) override {}
-    void on_connection_error(proton::connection&) override {}
+
+    void on_transport_error(proton::transport& t) override {
+        spdlog::warn("[TaskAmqpChannel] transport error: {}", t.error().what());
+        std::lock_guard<std::mutex> lk(mu_);
+        ready_ = false;
+        reply_addr_.clear();
+    }
+    void on_connection_error(proton::connection& c) override {
+        spdlog::warn("[TaskAmqpChannel] connection error: {}", c.error().what());
+    }
 
 private:
-    std::string    url_, username_, password_, send_addr_, recv_addr_, body_, corr_id_;
-    int            timeout_sec_;
-    AmqpResponse   result_;
+    std::string url_, user_, pass_, req_queue_, resp_queue_;
+
+    std::unique_ptr<proton::container> container_;
+    std::thread  thread_;
+
+    proton::sender      sender_;
+    proton::work_queue* wq_{nullptr};
+    std::string         reply_addr_;
+
+    std::mutex              mu_;
+    std::condition_variable ready_cv_;
+    std::condition_variable result_cv_;
+    bool        ready_{false};
+    bool        stopped_{false};
+    std::string pending_corr_;
+    AmqpResponse pending_result_;
 };
 
 // ── Simple request-ID generator ───────────────────────────────────────────────
@@ -147,6 +226,13 @@ static std::string makeReqId() {
 TaskManagerIqSource::TaskManagerIqSource(const SweepConfig& cfg) : cfg_(cfg) {
     pkt_buf_.resize(65536);
     resetAccum();
+
+    // Start persistent AMQP channel immediately — Artemis settles the connection
+    // in ~30 s.  By the time open() is called, it will already be ready.
+    amqp_ch_ = std::make_unique<TaskAmqpChannel>(
+        cfg_.amqp.url, cfg_.amqp.username, cfg_.amqp.password,
+        cfg_.amqp.task_request_queue, cfg_.amqp.task_response_queue);
+    amqp_ch_->start(60000);
 }
 TaskManagerIqSource::~TaskManagerIqSource() { close(); }
 
@@ -254,13 +340,7 @@ uint16_t TaskManagerIqSource::submitTask() {
 
     spdlog::info("[TaskMgrSrc] submitting SCAN task (req_id={})", req_id);
 
-    SyncAmqpExchange exchange(
-        cfg_.amqp.url, cfg_.amqp.username, cfg_.amqp.password,
-        cfg_.amqp.task_request_queue,
-        cfg_.amqp.task_response_queue,
-        body, req_id, 30);
-
-    auto resp = exchange.run();
+    auto resp = amqp_ch_->exchange(body, req_id, 30000);
     if (!resp.received)
         throw std::runtime_error("Task request timed out — is the controller running?");
 
@@ -299,12 +379,7 @@ void TaskManagerIqSource::sendTaskStop() {
         {"task_id",        task_id_},
         {"reason",         "scanner stopping"}
     };
-    SyncAmqpExchange exchange(
-        cfg_.amqp.url, cfg_.amqp.username, cfg_.amqp.password,
-        cfg_.amqp.task_request_queue,
-        "",  // no reply expected
-        msg.dump(), req_id, 5);
-    exchange.run();
+    amqp_ch_->send(msg.dump());
     spdlog::info("[TaskMgrSrc] TASK_STOP sent for task_id={}", task_id_);
     task_id_.clear();
 }

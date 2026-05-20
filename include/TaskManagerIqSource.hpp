@@ -2,9 +2,16 @@
 #include "IqSource.hpp"
 #include "SweepConfig.hpp"
 #include <atomic>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 
+namespace proton { class container; }
 namespace acq {
+
+class TaskAmqpChannel;  // persistent request/response channel — see .cpp
 
 // Production IqSource that drives the task manager as a client.
 // open()  — builds a dwell plan from SweepConfig, submits a SCAN task via
@@ -40,6 +47,10 @@ private:
     void         sendTaskStop();
     std::string  buildScanRequest(const std::string& req_id) const;
     void         resetAccum();
+
+    // Persistent AMQP channel — connects once so the 30s Artemis settlement
+    // cost is paid at startup rather than on every task submission.
+    std::unique_ptr<TaskAmqpChannel> amqp_ch_;
 
     // Port pre-bound before submitTask(); included in dest_ports[] so the
     // controller streams to the already-listening socket (eliminates race).
