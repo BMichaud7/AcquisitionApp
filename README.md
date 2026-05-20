@@ -8,8 +8,10 @@ Spectrum scanning application for the SDR Radio Resource Task Manager ecosystem.
 SweepConfig (XML)
      │
      ▼
-TaskManagerIqSource ──AMQP TASK_REQUEST_SCAN──► SdrResourceManager
-                    ◄──UDP CF32 IQ packets─────
+TaskManagerIqSource
+  │  TaskAmqpChannel (persistent — connects once at startup, ~16 ms/submit)
+  ├──AMQP TASK_REQUEST_SCAN──► SdrResourceManager
+  ◄──UDP CF32 IQ packets─────  (pre-bound socket eliminates data-loss race)
      │
      ▼
 SoapyIqSource (unit tests only — bypasses AMQP, drives hardware directly)
@@ -136,7 +138,7 @@ The bottleneck is the SDR hardware (IQ receive rate), not the CPU. Even a 2× im
 | `min_papr_db` | 3.0 | Minimum peak-to-mean power ratio for multi-bin detections |
 | `noise_floor_alpha` | 0.08 | EMA coefficient for per-frequency noise floor (~12-sweep time constant) |
 | `settle_samples` | 512 | Samples discarded after each retune |
-| `analysis_pause_ms` | 0 | Pause after each sweep pass to yield SDR to AnalysisApp (0 = disabled) |
+| `analysis_pause_ms` | 3000 | Pause after each sweep pass to yield SDR to AnalysisApp (ms; 0 = disabled). Recommended: 3000 ms with two AnalysisApp workers (classifies 2 signals in parallel within the window). |
 
 ## Dependencies
 
@@ -196,20 +198,25 @@ Test suite covers 61 cases across `FftProcessor`, `SpectrumScanner`, and `SweepC
 
 ## Detection output
 
-Each detection published to `rf.detections` (schema version **1.1**) contains:
+Each detection published to `rf.detections` (schema version **1.2**) contains:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `msg_type` | string | Always `"RF_DETECTION"` |
-| `schema_version` | string | `"1.1"` |
+| `schema_version` | string | `"1.2"` |
 | `timestamp_ms` | integer | Unix epoch ms (UTC) |
 | `scanner_id` | string | From config `<scanner_id>` |
 | `channel` | integer | RX channel index (0-based) |
 | `center_freq_hz` | number | Sub-bin interpolated center frequency (Hz) |
 | `bandwidth_hz` | integer | Estimated occupied bandwidth (Hz) |
 | `power_db` | number | Peak power in the detection run (dBFS) |
-| `iq_snapshot` | float array | **v1.1+** 1 024 complex samples (2 048 interleaved I,Q floats) from the detecting dwell. Used by AnalysisApp for zero-acquisition ONNX classification. |
-| `snapshot_sample_rate_sps` | number | **v1.1+** Sample rate of `iq_snapshot` (Hz, matches scan `sample_rate_sps`). Always present alongside `iq_snapshot`. |
+| `snr_db` | number | **v1.2+** PAPR of detected signal group (peak − mean, dB). Used by DfApp SNR filter. |
+| `iq_snapshot_b64` | string | **v1.2+** 1 024 complex samples encoded as base64 raw `float32` bytes (~11 KB). Decoders should check for this key first. |
+| `snapshot_sample_rate_sps` | number | **v1.1+** Sample rate of IQ snapshot (Hz). |
+
+> **Backward compat**: receivers that only understand schema 1.1 can fall back to
+> the `iq_snapshot` JSON float array key (still accepted by AnalysisApp and DfApp).
+> New publishers always emit `iq_snapshot_b64` (~2.6× smaller, ~10× faster to encode).
 
 The full JSON Schema is in [`schema/rf_detection.schema.json`](schema/rf_detection.schema.json).
 
@@ -218,13 +225,50 @@ The full JSON Schema is in [`schema/rf_detection.schema.json`](schema/rf_detecti
 | Version | Change |
 |---------|--------|
 | 1.0 | Initial release |
-| 1.1 | Added `iq_snapshot` + `snapshot_sample_rate_sps` (optional, for ONNX fast-path) |
+| 1.1 | Added `iq_snapshot` + `snapshot_sample_rate_sps` (JSON float array) |
+| 1.2 | `iq_snapshot_b64` (base64 binary, replaces 1.1 array); added `snr_db` |
 
 ## AnalysisApp co-existence
 
 When `analysis_pause_ms > 0`, the scanner releases the SDR after each sweep pass and sleeps for that duration, giving AnalysisApp (lower rank) a guaranteed window to grab the device for wideband classification. On re-submission, the scanner's higher rank preempts any running analysis.
 
 Recommended cycle with 20 MSPS PlutoSDR: 8s scan + 5s drain + 15s analysis window ≈ 28s per full cycle.
+
+## Kubernetes / k3s
+
+AcquisitionApp deploys as a **DaemonSet** — one pod per node that has a
+USB PlutoSDR physically attached. Label nodes before deploying:
+
+```bash
+kubectl label node <node-name> sdr-usb=true
+```
+
+Credentials are injected at pod start via an initContainer that renders the
+scanner.xml template (ConfigMap) with values from the shared `sdr-credentials`
+Secret. The main container reads the rendered file — the ConfigMap never
+contains real passwords.
+
+Deploy the full stack with one command:
+
+```bash
+cd ../SdrResourceManager
+./k8s/deploy.sh          # prompts for AMQP + DB passwords
+```
+
+Or apply just this manifest:
+
+```bash
+kubectl apply -f deploy/k8s/deployment.yaml
+```
+
+Key design choices:
+
+| Choice | Reason |
+|--------|--------|
+| DaemonSet, not Deployment | USB device is exclusive per node |
+| `hostNetwork: true` | Pre-bound UDP port must be reachable by the controller without NAT |
+| `privileged: true` | Required for USB PlutoSDR access and large `SO_RCVBUF` |
+| FFTW wisdom on `hostPath` | Avoids re-planning FFT on every pod restart |
 
 ## Repository
 
