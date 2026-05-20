@@ -8,9 +8,14 @@
 #include <proton/connection.hpp>
 #include <proton/connection_options.hpp>
 #include <proton/sender.hpp>
+#include <proton/sender_options.hpp>
 #include <proton/receiver.hpp>
+#include <proton/receiver_options.hpp>
+#include <proton/source_options.hpp>
+#include <proton/target_options.hpp>
 #include <proton/delivery.hpp>
 #include <proton/work_queue.hpp>
+#include <proton/symbol.hpp>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -74,9 +79,19 @@ public:
         c.connect(url_, opts);
     }
     void on_connection_open(proton::connection& conn) override {
-        conn.open_sender(send_addr_);
-        if (!recv_addr_.empty())
-            conn.open_receiver(recv_addr_);
+        // ANYCAST capabilities: Artemis routes to a proper queue address instead
+        // of defaulting to MULTICAST, which stalls credit propagation for ~30 s.
+        proton::sender_options sopts;
+        sopts.target(proton::target_options().capabilities(
+            {proton::symbol("queue")}));
+        conn.open_sender(send_addr_, sopts);
+
+        if (!recv_addr_.empty()) {
+            proton::receiver_options ropts;
+            ropts.source(proton::source_options().capabilities(
+                {proton::symbol("queue")}));
+            conn.open_receiver(recv_addr_, ropts);
+        }
     }
     void on_sender_open(proton::sender& s) override {
         proton::message msg;
