@@ -9,9 +9,10 @@
  *
  * Batches are flushed when either:
  * - @p batch_size detections have accumulated, or
- * - @p flush_interval_ms milliseconds have elapsed since the last flush.
+ * - @p flush_interval elapsed since the last flush.
  */
 #include "Types.hpp"
+#include <au/units/seconds.hh>
 #include <pqxx/pqxx>
 #include <queue>
 #include <mutex>
@@ -34,12 +35,12 @@ public:
      * @brief Open a PostgreSQL connection and start the writer thread.
      * @param conn_str        libpqxx connection string.
      * @param batch_size      Flush after accumulating this many records.
-     * @param flush_interval_ms Flush after this many ms even if batch is not full.
+     * @param flush_interval  Flush after this interval even if batch is not full.
      * @throws std::exception if the initial connection fails.
      */
     explicit DetectionDb(const std::string& conn_str,
                          int batch_size = 100,
-                         int flush_interval_ms = 500);
+                         au::QuantityD<au::Seconds> flush_interval = au::milli(au::seconds)(500.0));
     ~DetectionDb();
 
     DetectionDb(const DetectionDb&)            = delete;
@@ -56,14 +57,14 @@ public:
     void push(const Detection& d);
 
 private:
-    pqxx::connection          conn_;
-    std::queue<Detection>     queue_;
-    std::mutex                mutex_;
-    std::condition_variable   cv_;
-    std::atomic<bool>         stopped_{false};
-    std::thread               thread_;
-    int                       batch_size_;
-    int                       flush_interval_ms_;
+    pqxx::connection            conn_;
+    std::queue<Detection>       queue_;
+    std::mutex                  mutex_;
+    std::condition_variable     cv_;
+    std::atomic<bool>           stopped_{false};
+    std::thread                 thread_;
+    int                         batch_size_;
+    au::QuantityD<au::Seconds>  flush_interval_;
 
     void workerLoop();
     void flush(std::vector<Detection>& batch);

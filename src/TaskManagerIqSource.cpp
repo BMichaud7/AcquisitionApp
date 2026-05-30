@@ -244,7 +244,7 @@ void TaskManagerIqSource::resetAccum() {
     // Pre-reserve so packet inserts never reallocate mid-dwell.
     for (auto& buf : ch_accum_)
         buf.reserve(static_cast<size_t>(cfg_.sweep.dwell_samples));
-    current_center_hz_ = 0;
+    current_center_hz_ = au::hertz(0.0);
 }
 
 void TaskManagerIqSource::bindUdp(uint16_t port) {
@@ -480,16 +480,16 @@ bool TaskManagerIqSource::next(Dwell& d) {
 
         // IQ_FLAG_DWELL_CHANGE: first packet of a new dwell position.
         // Return the accumulated dwell (if any), then reset.
-        if ((hdr.flags & FLAG_DWELL_CHANGE) && current_center_hz_ != 0) {
+        if ((hdr.flags & FLAG_DWELL_CHANGE) && current_center_hz_ != au::hertz(0.0)) {
             bool has_data = false;
             for (auto& buf : ch_accum_)
                 if (!buf.empty()) { has_data = true; break; }
 
             if (has_data) {
-                d.center_hz  = au::hertz(static_cast<double>(current_center_hz_));
+                d.center_hz  = current_center_hz_;
                 d.ch_samples = std::move(ch_accum_);
                 resetAccum();
-                current_center_hz_ = hdr.center_freq_hz;
+                current_center_hz_ = au::hertz(static_cast<double>(hdr.center_freq_hz));
                 // Buffer the new-dwell samples for next call
                 if (ch < (int)ch_accum_.size())
                     ch_accum_[ch].insert(ch_accum_[ch].end(), samples, samples + n_samp);
@@ -497,13 +497,13 @@ bool TaskManagerIqSource::next(Dwell& d) {
             }
         }
 
-        current_center_hz_ = hdr.center_freq_hz;
+        current_center_hz_ = au::hertz(static_cast<double>(hdr.center_freq_hz));
         if (ch < (int)ch_accum_.size())
             ch_accum_[ch].insert(ch_accum_[ch].end(), samples, samples + n_samp);
 
         // Return a complete dwell once we have enough samples on channel 0
         if ((int)ch_accum_[0].size() >= cfg_.sweep.dwell_samples) {
-            d.center_hz  = au::hertz(static_cast<double>(current_center_hz_));
+            d.center_hz  = current_center_hz_;
             d.ch_samples = std::move(ch_accum_);
             resetAccum();
             return true;

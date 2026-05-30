@@ -7,8 +7,9 @@ namespace acq {
 
 using namespace std::chrono;
 
-DetectionDb::DetectionDb(const std::string& conn_str, int batch_size, int flush_interval_ms)
-    : conn_(conn_str), batch_size_(batch_size), flush_interval_ms_(flush_interval_ms)
+DetectionDb::DetectionDb(const std::string& conn_str, int batch_size,
+                         au::QuantityD<au::Seconds> flush_interval)
+    : conn_(conn_str), batch_size_(batch_size), flush_interval_(flush_interval)
 {
     pqxx::work txn(conn_);
     // Ensure the shared signals table exists (schema/init.sql should be run first,
@@ -75,7 +76,8 @@ void DetectionDb::workerLoop() {
         {
             std::unique_lock lock(mutex_);
             cv_.wait_for(lock,
-                milliseconds(flush_interval_ms_),
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::duration<double>(flush_interval_.in(au::seconds))),
                 [this]{ return (int)queue_.size() >= batch_size_ || stopped_; });
 
             while (!queue_.empty() && (int)batch.size() < batch_size_) {

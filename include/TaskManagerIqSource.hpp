@@ -25,6 +25,8 @@
  */
 #include "IqSource.hpp"
 #include "SweepConfig.hpp"
+#include <au/units/hertz.hh>
+#include <au/units/seconds.hh>
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -85,7 +87,7 @@ private:
     std::atomic<bool> running_{false};
 
     std::vector<std::vector<std::complex<float>>> ch_accum_; ///< Per-channel sample accumulators.
-    uint64_t current_center_hz_{0};
+    au::QuantityD<au::Hertz> current_center_hz_{au::hertz(0.0)};
     std::vector<uint8_t> pkt_buf_;  ///< Pre-allocated UDP receive buffer.
 
     void         bindUdp(uint16_t port);
