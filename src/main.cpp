@@ -15,6 +15,7 @@
 #include "TaskManagerIqSource.hpp"
 #include "DetectionDb.hpp"
 #include "AmqpPublisher.hpp"
+#include <au/units/hertz.hh>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <csignal>
@@ -57,7 +58,8 @@ int main(int argc, char* argv[]) {
 
     spdlog::info("SDR Acquisition — scanner_id={}", cfg.scanner_id);
     spdlog::info("Sweep: {:.3f}–{:.3f} MHz  rx_channels={}  controller={}",
-        cfg.sweep.start_hz / 1e6, cfg.sweep.stop_hz / 1e6,
+        cfg.sweep.start_hz.in(au::hertz) / 1e6,
+        cfg.sweep.stop_hz.in(au::hertz)  / 1e6,
         cfg.device.rx_channels, cfg.amqp.url);
 
     std::signal(SIGINT,  sigHandler);

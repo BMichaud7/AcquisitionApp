@@ -1,6 +1,8 @@
 #pragma once
 /**
  * @file FftProcessor.hpp
+ * @note Frequency/rate parameters use Au quantity types (au::QuantityD<au::Hertz>).
+ *       Raw double values remain for threshold_db, usable_fraction, and min_papr_db.
  * @brief Welch-averaged FFT + CA-CFAR signal detector for one dwell.
  *
  * Detection pipeline applied to each dwell of CF32 IQ samples:
@@ -21,6 +23,7 @@
  *
  * **Thread safety** — one instance per thread (owns FFTW plan and scratch buffers).
  */
+#include <au/units/hertz.hh>
 #include <complex>
 #include <vector>
 #include <cstdint>
@@ -92,12 +95,12 @@ public:
      * @return Detected signal groups, sorted by peak_db descending.
      */
     std::vector<Signal> detectFromSpectrum(
-        float    threshold_db,
-        float    usable_fraction,
-        double   sample_rate,
-        uint32_t min_signal_bw_hz,
-        uint32_t dc_guard_hz  = 0,
-        float    min_papr_db  = 3.0f,
+        float                    threshold_db,
+        float                    usable_fraction,
+        au::QuantityD<au::Hertz> sample_rate,
+        au::QuantityD<au::Hertz> min_signal_bw_hz,
+        au::QuantityD<au::Hertz> dc_guard_hz  = au::hertz(0.0),
+        float                    min_papr_db  = 3.0f,
         const std::vector<float>* hist_floor = nullptr);
 
     /**
@@ -113,33 +116,37 @@ public:
      */
     std::vector<Signal> detect(
         const std::complex<float>* samples,
-        int      n_samples,
-        float    threshold_db,
-        float    usable_fraction,
-        double   sample_rate,
-        uint32_t min_signal_bw_hz,
-        uint32_t dc_guard_hz = 0);
+        int                      n_samples,
+        float                    threshold_db,
+        float                    usable_fraction,
+        au::QuantityD<au::Hertz> sample_rate,
+        au::QuantityD<au::Hertz> min_signal_bw_hz,
+        au::QuantityD<au::Hertz> dc_guard_hz = au::hertz(0.0));
 
     /// @brief Power spectrum in dBFS after the last computeSpectrum() call.
     const std::vector<float>& powerDb() const { return power_db_; }
 
     /**
-     * @brief Convert an integer bin index to Hz (fftshift coordinates).
-     * @param bin        Bin index in fftshift layout.
-     * @param sample_rate Sample rate (samples/s).
-     * @param center_hz  LO centre frequency (Hz).
-     * @return Absolute frequency in Hz.
+     * @brief Convert an integer bin index to a frequency quantity (fftshift coordinates).
+     * @param bin         Bin index in fftshift layout.
+     * @param sample_rate Sample rate.
+     * @param center_hz   LO centre frequency.
+     * @return Absolute frequency as an Au quantity.
      */
-    uint64_t binToHz(int   bin, double sample_rate, uint64_t center_hz) const;
+    au::QuantityD<au::Hertz> binToHz(int   bin,
+                                     au::QuantityD<au::Hertz> sample_rate,
+                                     au::QuantityD<au::Hertz> center_hz) const;
 
     /**
-     * @brief Convert a fractional (sub-bin) index to Hz (fftshift coordinates).
-     * @param bin        Sub-bin position from parabolic interpolation.
-     * @param sample_rate Sample rate (samples/s).
-     * @param center_hz  LO centre frequency (Hz).
-     * @return Absolute frequency in Hz.
+     * @brief Convert a fractional (sub-bin) index to a frequency quantity (fftshift coordinates).
+     * @param bin         Sub-bin position from parabolic interpolation.
+     * @param sample_rate Sample rate.
+     * @param center_hz   LO centre frequency.
+     * @return Absolute frequency as an Au quantity.
      */
-    uint64_t binToHz(float bin, double sample_rate, uint64_t center_hz) const;
+    au::QuantityD<au::Hertz> binToHz(float bin,
+                                     au::QuantityD<au::Hertz> sample_rate,
+                                     au::QuantityD<au::Hertz> center_hz) const;
 
     /// @brief FFT size this processor was constructed with.
     int fft_size() const { return fft_size_; }

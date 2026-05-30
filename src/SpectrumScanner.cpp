@@ -1,7 +1,10 @@
 #include "SpectrumScanner.hpp"
+#include <au/units/hertz.hh>
+#include <au/units/seconds.hh>
 #include <spdlog/spdlog.h>
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <future>
 #include <unordered_set>
@@ -48,8 +51,8 @@ void SpectrumScanner::sweepLoop() {
 
         spdlog::info("[Scanner] source open: {} channel(s)  {:.3f}–{:.3f} MHz",
             cfg_.device.rx_channels,
-            cfg_.sweep.start_hz / 1e6,
-            cfg_.sweep.stop_hz  / 1e6);
+            cfg_.sweep.start_hz.in(au::hertz) / 1e6,
+            cfg_.sweep.stop_hz.in(au::hertz)  / 1e6);
 
         while (running_) {
             Dwell dwell;
@@ -82,10 +85,12 @@ void SpectrumScanner::sweepLoop() {
 
         source_->close();
 
-        if (running_ && cfg_.analysis_pause_ms > 0) {
+        if (running_ && cfg_.analysis_pause_ms > au::seconds(0.0)) {
+            auto pause_ms = static_cast<long long>(
+                cfg_.analysis_pause_ms.in(au::milli(au::seconds)));
             spdlog::info("[Scanner] analysis window — pausing {}ms before next sweep",
-                         cfg_.analysis_pause_ms);
-            auto pause_end = steady_clock::now() + milliseconds(cfg_.analysis_pause_ms);
+                         pause_ms);
+            auto pause_end = steady_clock::now() + milliseconds(pause_ms);
             while (running_ && steady_clock::now() < pause_end)
                 std::this_thread::sleep_for(milliseconds(100));
         }
@@ -93,10 +98,14 @@ void SpectrumScanner::sweepLoop() {
 }
 
 std::vector<Detection> SpectrumScanner::processDwell(
-    int ch, uint64_t center_hz,
+    int ch, au::QuantityD<au::Hertz> center_hz,
     const std::vector<std::complex<float>>& samples)
 {
     auto& proc = *processors_[ch];
+
+    // Use raw Hz value as map key for the persistence and noise-floor maps.
+    const uint64_t center_hz_raw = static_cast<uint64_t>(
+        std::llround(center_hz.in(au::hertz)));
 
     // ── Step 1: Welch spectrum (includes IQ correction estimation) ────────────
     proc.computeSpectrum(samples.data(), static_cast<int>(samples.size()));
@@ -119,11 +128,11 @@ std::vector<Detection> SpectrumScanner::processDwell(
     // Updated AFTER detection so signal-bin vs noise-bin distinction can be made.
     // Rises quickly when new interference appears; falls slowly when it clears.
     auto& floor_map = ch_noise_floor_[ch];
-    auto  it        = floor_map.find(center_hz);
+    auto  it        = floor_map.find(center_hz_raw);
     const auto& pdb = proc.powerDb();
     if (it == floor_map.end()) {
-        floor_map[center_hz] = pdb;
-        it = floor_map.find(center_hz);
+        floor_map[center_hz_raw] = pdb;
+        it = floor_map.find(center_hz_raw);
     } else {
         const float alpha_fall = cfg_.sweep.noise_floor_alpha;
         const float alpha_rise = std::min(4.0f * alpha_fall, 0.4f);
@@ -152,7 +161,7 @@ std::vector<Detection> SpectrumScanner::processDwell(
     // Each candidate must be detected in ≥ PERSIST_MIN_HITS consecutive sweeps
     // before being emitted. Strong signals (PAPR ≥ PERSIST_BYPASS_PAPR_DB) emit
     // immediately without waiting for confirmation — they're clearly real.
-    auto& pmap = ch_persist_[ch][center_hz];
+    auto& pmap = ch_persist_[ch][center_hz_raw];
     std::unordered_set<uint64_t> seen_this_dwell;
     seen_this_dwell.reserve(sigs.size() * 2);
 
@@ -161,9 +170,12 @@ std::vector<Detection> SpectrumScanner::processDwell(
     out.reserve(sigs.size());
 
     for (const auto& s : sigs) {
-        uint64_t f_lo = proc.binToHz(s.start_bin,  cfg_.device.sample_rate, center_hz);
-        uint64_t f_hi = proc.binToHz(s.end_bin,    cfg_.device.sample_rate, center_hz);
-        uint64_t fc   = proc.binToHz(s.center_bin, cfg_.device.sample_rate, center_hz);
+        auto f_lo_q = proc.binToHz(s.start_bin,  cfg_.device.sample_rate, center_hz);
+        auto f_hi_q = proc.binToHz(s.end_bin,    cfg_.device.sample_rate, center_hz);
+        auto fc_q   = proc.binToHz(s.center_bin, cfg_.device.sample_rate, center_hz);
+        uint64_t f_lo = static_cast<uint64_t>(std::llround(f_lo_q.in(au::hertz)));
+        uint64_t f_hi = static_cast<uint64_t>(std::llround(f_hi_q.in(au::hertz)));
+        uint64_t fc   = static_cast<uint64_t>(std::llround(fc_q.in(au::hertz)));
         uint64_t qfc  = (fc / PERSIST_FREQ_QUANT_HZ) * PERSIST_FREQ_QUANT_HZ;
 
         seen_this_dwell.insert(qfc);
@@ -185,8 +197,10 @@ std::vector<Detection> SpectrumScanner::processDwell(
 
         Detection d;
         d.timestamp                  = now;
-        d.center_freq_hz             = fc;
-        d.bandwidth_hz               = static_cast<uint32_t>(f_hi > f_lo ? f_hi - f_lo : 1);
+        d.center_freq_hz             = fc_q;
+        d.bandwidth_hz               = au::hertz(f_hi > f_lo
+                                           ? static_cast<double>(f_hi - f_lo)
+                                           : 1.0);
         d.power_db                   = s.peak_db;
         d.scanner_id                 = cfg_.scanner_id;
         d.channel                    = ch;

@@ -3,6 +3,7 @@
 // This header is compiled only into the acq_tests target.
 #include "IqSource.hpp"
 #include "SweepConfig.hpp"
+#include <au/units/hertz.hh>
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <SoapySDR/Errors.hpp>
@@ -38,9 +39,9 @@ public:
 
         int n_ch = cfg_.device.rx_channels;
         for (int ch = 0; ch < n_ch; ++ch) {
-            device_->setSampleRate(SOAPY_SDR_RX, ch, cfg_.device.sample_rate);
+            device_->setSampleRate(SOAPY_SDR_RX, ch, cfg_.device.sample_rate.in(au::hertz));
             device_->setGain(SOAPY_SDR_RX, ch, cfg_.device.rx_gain_db);
-            device_->setFrequency(SOAPY_SDR_RX, ch, (double)cfg_.sweep.start_hz);
+            device_->setFrequency(SOAPY_SDR_RX, ch, cfg_.sweep.start_hz.in(au::hertz));
         }
 
         std::vector<size_t> chs;
@@ -53,9 +54,9 @@ public:
         ptrs_.resize((size_t)n_ch);
         for (int ch = 0; ch < n_ch; ++ch) ptrs_[ch] = bufs_[ch].data();
 
-        pos_  = cfg_.sweep.start_hz;
-        step_ = static_cast<uint64_t>(cfg_.device.sample_rate * cfg_.sweep.usable_bw_fraction);
-        if (step_ == 0) step_ = 1;
+        pos_  = cfg_.sweep.start_hz.in(au::hertz);
+        step_ = cfg_.device.sample_rate.in(au::hertz) * cfg_.sweep.usable_bw_fraction;
+        if (step_ == 0.0) step_ = 1.0;
         running_ = true;
     }
 
@@ -77,13 +78,14 @@ public:
     bool next(Dwell& d) override {
         if (!running_) return false;
 
-        if (pos_ >= cfg_.sweep.stop_hz) pos_ = cfg_.sweep.start_hz;
+        if (pos_ >= cfg_.sweep.stop_hz.in(au::hertz))
+            pos_ = cfg_.sweep.start_hz.in(au::hertz);
 
-        uint64_t center = pos_ + step_ / 2;
+        double center = pos_ + step_ / 2.0;
         int n_ch = cfg_.device.rx_channels;
 
         for (int ch = 0; ch < n_ch; ++ch)
-            device_->setFrequency(SOAPY_SDR_RX, ch, (double)center);
+            device_->setFrequency(SOAPY_SDR_RX, ch, center);
 
         discardSamples(cfg_.sweep.settle_samples);
 
@@ -100,7 +102,7 @@ public:
         }
         if (!running_) return false;
 
-        d.center_hz = center;
+        d.center_hz = au::hertz(center);
         d.ch_samples.resize((size_t)n_ch);
         for (int ch = 0; ch < n_ch; ++ch)
             d.ch_samples[ch] = bufs_[ch];
@@ -125,8 +127,8 @@ private:
     std::string       uri_;
     SoapySDR::Device* device_{nullptr};
     SoapySDR::Stream* stream_{nullptr};
-    uint64_t          pos_{0};
-    uint64_t          step_{0};
+    double            pos_{0.0};
+    double            step_{0.0};
 
     std::vector<std::vector<std::complex<float>>> bufs_;
     std::vector<void*>                            ptrs_;

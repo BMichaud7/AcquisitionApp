@@ -21,6 +21,14 @@ endif()
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 
+# ── Au (Aurora units library) ─────────────────────────────────────────────────
+include(FetchContent)
+FetchContent_Declare(Au
+    GIT_REPOSITORY https://github.com/aurora-opensource/au.git
+    GIT_TAG        0.5.1
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(Au)
+
 # ── SdrSdk (provides sdr_task_api types via its subdirectory) ─────────────────
 # Expected as a sibling directory: ../SdrSdk  (same parent as this repo).
 # SdrSdk itself expects ../SdrTaskApi as its own sibling.
@@ -139,6 +147,7 @@ if(PROTON_FOUND AND PQXX_FOUND)
     target_include_directories(sdr_acquisition PRIVATE include)
     target_link_libraries(sdr_acquisition PRIVATE
         sdr_task_api
+        Au::au
         PkgConfig::PROTON
         PkgConfig::TINYXML2
         PkgConfig::FFTW3F

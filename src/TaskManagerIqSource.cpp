@@ -1,4 +1,5 @@
 #include "TaskManagerIqSource.hpp"
+#include <au/units/hertz.hh>
 #include <sdr/Types.hpp>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
@@ -280,20 +281,25 @@ void TaskManagerIqSource::bindUdp(uint16_t port) {
 }
 
 std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) const {
-    double step_hz = cfg_.device.sample_rate * cfg_.sweep.usable_bw_fraction;
+    const double sr_hz       = cfg_.device.sample_rate.in(au::hertz);
+    const double bw_hz       = cfg_.device.bandwidth_hz.in(au::hertz);
+    const double start_hz    = cfg_.sweep.start_hz.in(au::hertz);
+    const double stop_hz     = cfg_.sweep.stop_hz.in(au::hertz);
+
+    double step_hz = sr_hz * cfg_.sweep.usable_bw_fraction;
     int    dwell_ms = static_cast<int>(
-        cfg_.sweep.dwell_samples * 1000.0 / cfg_.device.sample_rate);
+        cfg_.sweep.dwell_samples * 1000.0 / sr_hz);
     dwell_ms = std::max(dwell_ms, 1);
 
     json entries = json::array();
     int step_i = 0;
-    for (uint64_t pos = cfg_.sweep.start_hz; pos < cfg_.sweep.stop_hz; pos += (uint64_t)step_hz) {
+    for (double pos = start_hz; pos < stop_hz; pos += step_hz) {
         double center = pos + step_hz / 2.0;
         entries.push_back({
             {"step",            step_i++},
             {"center_freq_hz",  center},
-            {"bandwidth_hz",    cfg_.device.bandwidth_hz},
-            {"sample_rate_sps", cfg_.device.sample_rate},
+            {"bandwidth_hz",    bw_hz},
+            {"sample_rate_sps", sr_hz},
             {"dwell_ms",        dwell_ms}
         });
     }
@@ -320,9 +326,9 @@ std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) con
         {"rank",           cfg_.rank},
         {"schedule", {{"mode", "CONTINUOUS"}}},
         {"rf", {
-            {"center_freq_hz",    (cfg_.sweep.start_hz + cfg_.sweep.stop_hz) / 2.0},
-            {"bandwidth_hz",      cfg_.device.bandwidth_hz},
-            {"sample_rate_sps",   cfg_.device.sample_rate},
+            {"center_freq_hz",    (start_hz + stop_hz) / 2.0},
+            {"bandwidth_hz",      bw_hz},
+            {"sample_rate_sps",   sr_hz},
             {"rx_count",          cfg_.device.rx_channels},
             {"rx_gain_db",        gains},
             {"preferred_device",  preferred_device_}
@@ -480,7 +486,7 @@ bool TaskManagerIqSource::next(Dwell& d) {
                 if (!buf.empty()) { has_data = true; break; }
 
             if (has_data) {
-                d.center_hz  = current_center_hz_;
+                d.center_hz  = au::hertz(static_cast<double>(current_center_hz_));
                 d.ch_samples = std::move(ch_accum_);
                 resetAccum();
                 current_center_hz_ = hdr.center_freq_hz;
@@ -497,7 +503,7 @@ bool TaskManagerIqSource::next(Dwell& d) {
 
         // Return a complete dwell once we have enough samples on channel 0
         if ((int)ch_accum_[0].size() >= cfg_.sweep.dwell_samples) {
-            d.center_hz  = current_center_hz_;
+            d.center_hz  = au::hertz(static_cast<double>(current_center_hz_));
             d.ch_samples = std::move(ch_accum_);
             resetAccum();
             return true;

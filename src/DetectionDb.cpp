@@ -1,4 +1,5 @@
 #include "DetectionDb.hpp"
+#include <au/units/hertz.hh>
 #include <spdlog/spdlog.h>
 #include <chrono>
 
@@ -115,8 +116,11 @@ void DetectionDb::flush(std::vector<Detection>& batch) {
         auto ms = duration_cast<milliseconds>(
             d.timestamp.time_since_epoch()).count();
 
+        const double center_freq_raw = d.center_freq_hz.in(au::hertz);
+        const double bandwidth_raw   = d.bandwidth_hz.in(au::hertz);
+
         std::optional<double> bw_opt;
-        if (d.bandwidth_hz > 0) bw_opt = (double)d.bandwidth_hz;
+        if (bandwidth_raw > 0) bw_opt = bandwidth_raw;
 
         // Find a recent signal at the same frequency (±10 kHz) with similar
         // bandwidth (±50%).  Matches classified OR unclassified rows — if the
@@ -129,7 +133,7 @@ void DetectionDb::flush(std::vector<Detection>& batch) {
             "  AND last_seen > now() - interval '10 minutes' "
             "ORDER BY abs(freq_hz - $1) ASC "
             "LIMIT 1",
-            (double)d.center_freq_hz,
+            center_freq_raw,
             bw_opt);
 
         if (!existing.empty()) {
@@ -156,8 +160,8 @@ void DetectionDb::flush(std::vector<Detection>& batch) {
                 "  to_timestamp($1::double precision / 1000.0), "
                 "  $2, $3, $4, $5, $6, $7)",
                 ms,
-                (double)d.center_freq_hz,
-                d.center_freq_hz / 1e6,
+                center_freq_raw,
+                center_freq_raw / 1e6,
                 bw_opt,
                 d.power_db,
                 d.scanner_id,

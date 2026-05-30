@@ -49,6 +49,7 @@ target_include_directories(acq_tests PRIVATE
 
 target_link_libraries(acq_tests PRIVATE
     GTest::gtest_main
+    Au::au
     SoapySDR
     PkgConfig::FFTW3F
     PkgConfig::TINYXML2
@@ -77,6 +78,7 @@ target_include_directories(acq_bench PRIVATE
     ${_SPDLOG_INCS}
 )
 target_link_libraries(acq_bench PRIVATE
+    Au::au
     PkgConfig::FFTW3F
     ${_SPDLOG_LIBS}
     Threads::Threads

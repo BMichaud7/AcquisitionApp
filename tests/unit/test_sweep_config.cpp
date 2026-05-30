@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "SweepConfig.hpp"
+#include <au/units/hertz.hh>
 #include <cstdio>
 #include <fstream>
 #include <string>
@@ -43,8 +44,8 @@ TEST_F(SweepConfigTest, ParsesMinimalRequiredElements) {
           </sweep>
         </sdr_acquisition>)");
 
-    EXPECT_EQ(cfg.sweep.start_hz, 70'000'000ULL);
-    EXPECT_EQ(cfg.sweep.stop_hz, 1'000'000'000ULL);
+    EXPECT_DOUBLE_EQ(cfg.sweep.start_hz.in(au::hertz), 70'000'000.0);
+    EXPECT_DOUBLE_EQ(cfg.sweep.stop_hz.in(au::hertz), 1'000'000'000.0);
 }
 
 TEST_F(SweepConfigTest, DefaultsAppliedWhenOptionalElementsMissing) {
@@ -59,7 +60,7 @@ TEST_F(SweepConfigTest, DefaultsAppliedWhenOptionalElementsMissing) {
 
     // Check key defaults from SweepParams
     EXPECT_EQ(cfg.device.rx_channels,    1);
-    EXPECT_DOUBLE_EQ(cfg.device.sample_rate, 10e6);
+    EXPECT_DOUBLE_EQ(cfg.device.sample_rate.in(au::hertz), 10e6);
     EXPECT_DOUBLE_EQ(cfg.device.rx_gain_db,  40.0);
     EXPECT_EQ(cfg.sweep.fft_size,         4096);
     EXPECT_DOUBLE_EQ(cfg.sweep.threshold_db, 10.0);
@@ -123,16 +124,16 @@ TEST_F(SweepConfigTest, ParsesAllOptionalFields) {
     EXPECT_EQ(cfg.db.password, "dbpass");
 
     EXPECT_EQ(cfg.device.rx_channels, 2);
-    EXPECT_DOUBLE_EQ(cfg.device.sample_rate, 20e6);
+    EXPECT_DOUBLE_EQ(cfg.device.sample_rate.in(au::hertz), 20e6);
     EXPECT_DOUBLE_EQ(cfg.device.rx_gain_db,  50.0);
 
-    EXPECT_EQ(cfg.sweep.start_hz,            88'000'000ULL);
-    EXPECT_EQ(cfg.sweep.stop_hz,            108'000'000ULL);
+    EXPECT_DOUBLE_EQ(cfg.sweep.start_hz.in(au::hertz),  88'000'000.0);
+    EXPECT_DOUBLE_EQ(cfg.sweep.stop_hz.in(au::hertz),  108'000'000.0);
     EXPECT_EQ(cfg.sweep.fft_size,            512);
     EXPECT_EQ(cfg.sweep.dwell_samples,       1024);
     EXPECT_DOUBLE_EQ(cfg.sweep.usable_bw_fraction, 0.75);
     EXPECT_DOUBLE_EQ(cfg.sweep.threshold_db,  8.0);
-    EXPECT_EQ(cfg.sweep.min_signal_bw_hz,    5000u);
+    EXPECT_DOUBLE_EQ(cfg.sweep.min_signal_bw_hz.in(au::hertz), 5000.0);
     EXPECT_EQ(cfg.sweep.settle_samples,      256);
 }
 
@@ -242,7 +243,7 @@ TEST_F(SweepConfigTest, DeviceBandwidthHzDefaultIsPositive) {
           <device><rx_channels>1</rx_channels></device>
           <sweep><start_hz>100000000</start_hz><stop_hz>200000000</stop_hz></sweep>
         </sdr_acquisition>)");
-    EXPECT_GT(cfg.device.bandwidth_hz, 0.0);
+    EXPECT_GT(cfg.device.bandwidth_hz.in(au::hertz), 0.0);
 }
 
 TEST_F(SweepConfigTest, UsableBwFractionDefaultInValidRange) {

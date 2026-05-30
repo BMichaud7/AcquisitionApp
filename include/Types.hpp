@@ -6,6 +6,8 @@
  * A Detection is produced by SpectrumScanner for each confirmed signal and
  * forwarded to AmqpPublisher (AMQP) and DetectionDb (PostgreSQL).
  */
+#include <au/units/hertz.hh>
+#include <au/units/seconds.hh>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -31,8 +33,8 @@ inline constexpr const char* SCHEMA_VERSION = "1.2";  // base64 iq_snapshot, snr
  */
 struct Detection {
     std::chrono::system_clock::time_point timestamp; ///< Wall-clock time of detection.
-    uint64_t    center_freq_hz{0};   ///< Sub-bin interpolated centre frequency (Hz).
-    uint32_t    bandwidth_hz{0};     ///< Estimated occupied bandwidth (Hz).
+    au::QuantityD<au::Hertz> center_freq_hz{au::hertz(0.0)}; ///< Sub-bin interpolated centre frequency.
+    au::QuantityD<au::Hertz> bandwidth_hz{au::hertz(0.0)};   ///< Estimated occupied bandwidth.
     float       power_db{0.f};       ///< Peak power in the detection run (dBFS).
     std::string scanner_id;          ///< Scanner identifier from SweepConfig.
     int         channel{0};          ///< RX channel index (0-based).
@@ -42,7 +44,7 @@ struct Detection {
     /// Shared across all detections from the same dwell — zero-copy shared_ptr.
     /// Null when no snapshot was collected (unit tests or snapshot disabled).
     std::shared_ptr<const std::vector<float>> iq_snapshot;
-    double snapshot_sample_rate_sps{0.0}; ///< Sample rate of the IQ snapshot (samples/s).
+    au::QuantityD<au::Hertz> snapshot_sample_rate_sps{au::hertz(0.0)}; ///< Sample rate of the IQ snapshot.
 };
 
 } // namespace acq

@@ -1,10 +1,14 @@
 #include <gtest/gtest.h>
 #include "FftProcessor.hpp"
+#include <au/units/hertz.hh>
 #include <algorithm>
 #include <cmath>
 #include <complex>
 #include <random>
 #include <vector>
+
+// Convenience helpers so test bodies remain readable
+static au::QuantityD<au::Hertz> Hz(double v) { return au::hertz(v); }
 
 using namespace acq;
 
@@ -75,7 +79,7 @@ TEST(FftProcessor, InvalidSizeNotPowerOfTwoThrows) {
 TEST(FftProcessor, ZeroInputProducesNoDetections) {
     FftProcessor proc(256);
     auto zeros = makeZeros(256);
-    auto sigs = proc.detect(zeros.data(), (int)zeros.size(), 10.0f, 0.80f, 10e6, 1000);
+    auto sigs = proc.detect(zeros.data(), (int)zeros.size(), 10.0f, 0.80f, Hz(10e6), Hz(1000));
     EXPECT_TRUE(sigs.empty());
 }
 
@@ -84,7 +88,7 @@ TEST(FftProcessor, ZeroInputProducesNoDetections) {
 TEST(FftProcessor, ToneAtBin64DetectedInUsableBand) {
     FftProcessor proc(256);
     auto tone = makeTone(256, 0.25f, 1.0f);
-    auto sigs = proc.detect(tone.data(), (int)tone.size(), 100.0f, 0.80f, 10e6, 1000);
+    auto sigs = proc.detect(tone.data(), (int)tone.size(), 100.0f, 0.80f, Hz(10e6), Hz(1000));
     ASSERT_FALSE(sigs.empty()) << "Expected a detection for a strong tone";
     auto best = std::max_element(sigs.begin(), sigs.end(),
         [](const auto& a, const auto& b){ return a.peak_db < b.peak_db; });
@@ -94,14 +98,14 @@ TEST(FftProcessor, ToneAtBin64DetectedInUsableBand) {
 TEST(FftProcessor, WeakToneBelowThresholdNotDetected) {
     FftProcessor proc(256);
     auto tone = makeTone(256, 0.25f, 0.001f);
-    auto sigs = proc.detect(tone.data(), (int)tone.size(), 300.0f, 0.80f, 10e6, 1000);
+    auto sigs = proc.detect(tone.data(), (int)tone.size(), 300.0f, 0.80f, Hz(10e6), Hz(1000));
     EXPECT_TRUE(sigs.empty()) << "Nothing should exceed a 300 dB margin above noise";
 }
 
 TEST(FftProcessor, ToneOutsideUsableBandNotDetected) {
     FftProcessor proc(256);
     auto tone = makeTone(256, 0.47f, 1.0f);
-    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, 10e6, 1000);
+    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, Hz(10e6), Hz(1000));
     for (const auto& s : sigs) {
         EXPECT_LE(s.start_bin, 230) << "Detection outside usable band";
         EXPECT_GE(s.start_bin, 25)  << "Detection outside usable band";
@@ -113,14 +117,14 @@ TEST(FftProcessor, ToneOutsideUsableBandNotDetected) {
 TEST(FftProcessor, MinBwFilterSuppressesNarrowPeak) {
     FftProcessor proc(256);
     auto tone = makeTone(256, 0.25f, 1.0f);
-    auto sigs = proc.detect(tone.data(), (int)tone.size(), 100.0f, 0.80f, 10e6, 200'000);
+    auto sigs = proc.detect(tone.data(), (int)tone.size(), 100.0f, 0.80f, Hz(10e6), Hz(200'000));
     EXPECT_TRUE(sigs.empty()) << "1-bin detection should be filtered by min_bw=200 kHz";
 }
 
 TEST(FftProcessor, SmallMinBwAllowsSingleBinDetection) {
     FftProcessor proc(256);
     auto tone = makeTone(256, 0.25f, 1.0f);
-    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, 10e6, 1000);
+    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, Hz(10e6), Hz(1000));
     EXPECT_FALSE(sigs.empty()) << "Single-bin tone should pass min_bw=1 kHz filter";
 }
 
@@ -128,31 +132,31 @@ TEST(FftProcessor, SmallMinBwAllowsSingleBinDetection) {
 
 TEST(FftProcessor, BinToHz_CenterBinIsExactlyCenter) {
     FftProcessor proc(256);
-    uint64_t center = 915'000'000ULL;
-    EXPECT_EQ(proc.binToHz(128, 10e6, center), center);
+    double center = 915'000'000.0;
+    EXPECT_DOUBLE_EQ(proc.binToHz(128, Hz(10e6), Hz(center)).in(au::hertz), center);
 }
 
 TEST(FftProcessor, BinToHz_Bin0IsLowestFrequency) {
     FftProcessor proc(256);
-    uint64_t center = 915'000'000ULL;
-    uint64_t expected = center - 5'000'000ULL;
-    EXPECT_NEAR((double)proc.binToHz(0, 10e6, center), (double)expected, 2.0);
+    double center = 915'000'000.0;
+    double expected = center - 5'000'000.0;
+    EXPECT_NEAR(proc.binToHz(0, Hz(10e6), Hz(center)).in(au::hertz), expected, 2.0);
 }
 
 TEST(FftProcessor, BinToHz_LastBinIsNearNyquist) {
     FftProcessor proc(256);
-    uint64_t center = 915'000'000ULL;
-    uint64_t hz = proc.binToHz(255, 10e6, center);
+    double center = 915'000'000.0;
+    double hz = proc.binToHz(255, Hz(10e6), Hz(center)).in(au::hertz);
     EXPECT_GT(hz, center);
-    EXPECT_LT(hz, center + (uint64_t)(10e6 / 2) + 100);
+    EXPECT_LT(hz, center + 10e6 / 2 + 100);
 }
 
 TEST(FftProcessor, BinToHz_MonotonicallyIncreasingAcrossBins) {
     FftProcessor proc(64);
-    uint64_t center = 433'000'000ULL;
-    uint64_t prev = proc.binToHz(0, 2e6, center);
+    double center = 433'000'000.0;
+    double prev = proc.binToHz(0, Hz(2e6), Hz(center)).in(au::hertz);
     for (int b = 1; b < 64; ++b) {
-        uint64_t cur = proc.binToHz(b, 2e6, center);
+        double cur = proc.binToHz(b, Hz(2e6), Hz(center)).in(au::hertz);
         EXPECT_GT(cur, prev) << "binToHz should increase with bin index";
         prev = cur;
     }
@@ -160,33 +164,32 @@ TEST(FftProcessor, BinToHz_MonotonicallyIncreasingAcrossBins) {
 
 TEST(FftProcessor, BinToHz_SymmetricAroundCenter) {
     FftProcessor proc(256);
-    uint64_t center = 915'000'000ULL;
-    int64_t lo = (int64_t)proc.binToHz(0,   10e6, center);
-    int64_t hi = (int64_t)proc.binToHz(255, 10e6, center);
-    int64_t dl = (int64_t)center - lo;
-    int64_t dr = hi - (int64_t)center;
-    EXPECT_NEAR((double)dl, (double)dr, 10e6 / 256 + 1);
+    double center = 915'000'000.0;
+    double lo = proc.binToHz(0,   Hz(10e6), Hz(center)).in(au::hertz);
+    double hi = proc.binToHz(255, Hz(10e6), Hz(center)).in(au::hertz);
+    double dl = center - lo;
+    double dr = hi - center;
+    EXPECT_NEAR(dl, dr, 10e6 / 256 + 1);
 }
 
 // ── Float binToHz overload (sub-bin interpolation) ────────────────────────────
 
 TEST(FftProcessor, BinToHz_FloatOverloadMatchesIntAtIntegerBin) {
     FftProcessor proc(256);
-    uint64_t center = 915'000'000ULL;
+    double center = 915'000'000.0;
     for (int b : {0, 64, 128, 192, 255}) {
-        EXPECT_EQ(proc.binToHz((float)b, 10e6, center),
-                  proc.binToHz(b,        10e6, center))
+        EXPECT_DOUBLE_EQ(proc.binToHz((float)b, Hz(10e6), Hz(center)).in(au::hertz),
+                         proc.binToHz(b,        Hz(10e6), Hz(center)).in(au::hertz))
             << "Float binToHz should match int version at integer bin " << b;
     }
 }
 
 TEST(FftProcessor, BinToHz_FloatOverloadInterpolatesBetweenBins) {
     FftProcessor proc(256);
-    uint64_t center = 915'000'000ULL;
-    double sr = 10e6;
-    uint64_t hz_lo = proc.binToHz(128,   sr, center);
-    uint64_t hz_hi = proc.binToHz(129,   sr, center);
-    uint64_t hz_mid = proc.binToHz(128.5f, sr, center);
+    double center = 915'000'000.0;
+    double hz_lo  = proc.binToHz(128,    Hz(10e6), Hz(center)).in(au::hertz);
+    double hz_hi  = proc.binToHz(129,    Hz(10e6), Hz(center)).in(au::hertz);
+    double hz_mid = proc.binToHz(128.5f, Hz(10e6), Hz(center)).in(au::hertz);
     // Mid-point should be between the two integer bins
     EXPECT_GT(hz_mid, hz_lo);
     EXPECT_LT(hz_mid, hz_hi);
@@ -214,10 +217,10 @@ TEST(FftProcessor, DetectFromSpectrum_MatchesConvenienceDetect) {
 
     // Split API
     proc.computeSpectrum(tone.data(), (int)tone.size());
-    auto split_sigs = proc.detectFromSpectrum(5.0f, 0.80f, 10e6, 1000);
+    auto split_sigs = proc.detectFromSpectrum(5.0f, 0.80f, Hz(10e6), Hz(1000));
 
     // Convenience
-    auto conv_sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, 10e6, 1000);
+    auto conv_sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, Hz(10e6), Hz(1000));
 
     ASSERT_EQ(split_sigs.size(), conv_sigs.size())
         << "Split and convenience APIs should return same number of signals";
@@ -233,7 +236,7 @@ TEST(FftProcessor, DetectFromSpectrum_ThresholdAboveAllPowerProducesNoDetections
     auto tone = makeTone(256, 0.25f, 1.0f);
     proc.computeSpectrum(tone.data(), (int)tone.size());
     // 999 dB above any realistic floor — nothing should pass
-    auto sigs = proc.detectFromSpectrum(999.0f, 0.80f, 10e6, 1000);
+    auto sigs = proc.detectFromSpectrum(999.0f, 0.80f, Hz(10e6), Hz(1000));
     EXPECT_TRUE(sigs.empty());
 }
 
@@ -243,7 +246,7 @@ TEST(FftProcessor, CenterBinIsWithinRunBounds) {
     FftProcessor proc(512);
     // Use a larger FFT and multiple dwell frames for sharper peak.
     auto tone = makeTone(512 * 4, 0.3f, 1.0f);
-    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, 20e6, 1000);
+    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, Hz(20e6), Hz(1000));
     ASSERT_FALSE(sigs.empty());
     for (const auto& s : sigs) {
         EXPECT_GE(s.center_bin, (float)(s.start_bin - 1));
@@ -256,7 +259,7 @@ TEST(FftProcessor, CenterBinCloserToTrueFrequencyThanBinCenter) {
     // Sub-bin interpolation should place center_bin closer to 204.8 than 205.
     FftProcessor proc(256);
     auto tone = makeTone(256 * 8, 0.3f, 1.0f);
-    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, 10e6, 1000);
+    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, Hz(10e6), Hz(1000));
     ASSERT_FALSE(sigs.empty());
     float expected = 0.3f * 256.f + 128.f;  // = 204.8
     auto best = std::max_element(sigs.begin(), sigs.end(),
@@ -272,7 +275,7 @@ TEST(FftProcessor, CenterBinCloserToTrueFrequencyThanBinCenter) {
 TEST(FftProcessor, NoiseFloorRobustToMinoritySignal) {
     FftProcessor proc(256);
     auto tone = makeTone(256, 0.25f, 1.0f);
-    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, 10e6, 1000);
+    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, Hz(10e6), Hz(1000));
     EXPECT_FALSE(sigs.empty()) << "Noise floor estimate should not be dominated by tone";
 }
 
@@ -292,7 +295,7 @@ TEST(FftProcessor, CafarDetectsWeakSignalAlongsideStrongOne) {
         signal[i] += 0.04f * std::complex<float>(std::cos(phi2), std::sin(phi2));
     }
     FftProcessor proc(FFT);
-    auto sigs = proc.detect(signal.data(), N, 8.0f, 0.80f, 20e6, 1000);
+    auto sigs = proc.detect(signal.data(), N, 8.0f, 0.80f, Hz(20e6), Hz(1000));
     // Both signals should be detected (they're spectrally separated by 25% of SR).
     EXPECT_GE(sigs.size(), 2u)
         << "CA-CFAR should detect weak signal despite nearby strong one";
@@ -304,7 +307,7 @@ TEST(FftProcessor, PaprFilter_StrongTonePassesFilter) {
     // A sharp spectral peak (tone) has high PAPR → always passes PAPR filter.
     FftProcessor proc(256);
     auto tone = makeTone(256 * 4, 0.25f, 1.0f);
-    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, 10e6, 1000);
+    auto sigs = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, Hz(10e6), Hz(1000));
     EXPECT_FALSE(sigs.empty()) << "A pure tone has high PAPR and should always be detected";
 }
 
@@ -317,8 +320,9 @@ TEST(FftProcessor, PaprFilter_HighMinPapr_SuppressesFlatBumps) {
     // At threshold=5 dB above local noise: with AWGN, CA-CFAR should produce few/no
     // detections; at very high PAPR requirement, even fewer.
     auto sigs_hi = proc.detect(noise.data(), (int)noise.size(),
-                                5.0f, 0.80f, 10e6, 1000);
-    auto sigs_lo = proc.detectFromSpectrum(5.0f, 0.80f, 10e6, 1000, 0, 0.0f);  // min_papr=0
+                                5.0f, 0.80f, Hz(10e6), Hz(1000));
+    auto sigs_lo = proc.detectFromSpectrum(5.0f, 0.80f, Hz(10e6), Hz(1000),
+                                            au::hertz(0.0), 0.0f);  // min_papr=0
     // High PAPR must not produce MORE detections than low PAPR.
     EXPECT_LE(sigs_hi.size(), sigs_lo.size())
         << "Higher min_papr_db should not increase detection count";
@@ -341,7 +345,7 @@ TEST(FftProcessor, ImbalancedIqToneIsStillDetected) {
     auto signal = makeImbalancedTone(N, 0.25f, 1.10f, 0.0873f);
 
     FftProcessor proc(FFT);
-    auto sigs = proc.detect(signal.data(), N, 5.0f, 0.80f, 20e6, 1000);
+    auto sigs = proc.detect(signal.data(), N, 5.0f, 0.80f, Hz(20e6), Hz(1000));
     ASSERT_FALSE(sigs.empty()) << "Imbalanced IQ tone must still produce at least one detection";
     auto best = std::max_element(sigs.begin(), sigs.end(),
         [](const auto& a, const auto& b){ return a.peak_db < b.peak_db; });
@@ -388,7 +392,7 @@ TEST(FftProcessor, TwoSeparatedTonesYieldAtLeastTwoDetections) {
     auto t2 = makeTone(256,  0.25f, 1.0f);
     std::vector<std::complex<float>> combined(256);
     for (int i = 0; i < 256; ++i) combined[i] = t1[i] + t2[i];
-    auto sigs = proc.detect(combined.data(), (int)combined.size(), 40.0f, 0.80f, 10e6, 1000);
+    auto sigs = proc.detect(combined.data(), (int)combined.size(), 40.0f, 0.80f, Hz(10e6), Hz(1000));
     EXPECT_GE(sigs.size(), 2u)
         << "Two well-separated tones should produce at least two distinct detections";
 }
@@ -398,7 +402,7 @@ TEST(FftProcessor, ExactlyMinimumFftSizeIsValid) {
     FftProcessor proc(64);
     EXPECT_EQ(proc.fft_size(), 64);
     auto zeros = makeZeros(64);
-    EXPECT_NO_THROW(proc.detect(zeros.data(), (int)zeros.size(), 5.0f, 0.80f, 2e6, 1000));
+    EXPECT_NO_THROW(proc.detect(zeros.data(), (int)zeros.size(), 5.0f, 0.80f, Hz(2e6), Hz(1000)));
 }
 
 TEST(FftProcessor, LargeFftSizeWorks) {
@@ -406,15 +410,15 @@ TEST(FftProcessor, LargeFftSizeWorks) {
     FftProcessor proc(4096);
     EXPECT_EQ(proc.fft_size(), 4096);
     auto zeros = makeZeros(4096);
-    auto sigs = proc.detect(zeros.data(), (int)zeros.size(), 5.0f, 0.80f, 56e6, 1000);
+    auto sigs = proc.detect(zeros.data(), (int)zeros.size(), 5.0f, 0.80f, Hz(56e6), Hz(1000));
     EXPECT_TRUE(sigs.empty());
 }
 
 TEST(FftProcessor, DetectIsIdempotent) {
     FftProcessor proc(256);
     auto tone = makeTone(256, 0.25f, 1.0f);
-    auto s1 = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, 10e6, 1000);
-    auto s2 = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, 10e6, 1000);
+    auto s1 = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, Hz(10e6), Hz(1000));
+    auto s2 = proc.detect(tone.data(), (int)tone.size(), 5.0f, 0.80f, Hz(10e6), Hz(1000));
     ASSERT_EQ(s1.size(), s2.size());
     for (size_t i = 0; i < s1.size(); ++i) {
         EXPECT_EQ(s1[i].start_bin, s2[i].start_bin);

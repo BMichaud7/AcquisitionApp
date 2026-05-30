@@ -22,6 +22,7 @@
 #include "FftProcessor.hpp"
 #include "IqSource.hpp"
 #include "Types.hpp"
+#include <au/units/hertz.hh>
 #include <atomic>
 #include <thread>
 #include <functional>
@@ -98,11 +99,11 @@ private:
     /**
      * @brief Process one dwell and return confirmed detections.
      * @param ch         Channel index.
-     * @param center_hz  LO centre frequency for this dwell (Hz).
+     * @param center_hz  LO centre frequency for this dwell.
      * @param samples    IQ samples for this dwell.
      * @return Detections that passed the persistence filter.
      */
-    std::vector<Detection> processDwell(int ch, uint64_t center_hz,
+    std::vector<Detection> processDwell(int ch, au::QuantityD<au::Hertz> center_hz,
                                          const std::vector<std::complex<float>>& samples);
 };
 

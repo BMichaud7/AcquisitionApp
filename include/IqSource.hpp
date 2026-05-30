@@ -10,6 +10,7 @@
  * - **SoapyIqSource** (unit tests only) — drives a SoapySDR device directly,
  *   bypassing AMQP entirely.
  */
+#include <au/units/hertz.hh>
 #include <complex>
 #include <cstdint>
 #include <vector>
@@ -23,7 +24,7 @@ namespace acq {
  * For a single-channel PlutoSDR, ch_samples has one element.
  */
 struct Dwell {
-    uint64_t center_hz{0};  ///< LO centre frequency for this dwell (Hz).
+    au::QuantityD<au::Hertz> center_hz{au::hertz(0.0)}; ///< LO centre frequency for this dwell.
     /// Samples per channel: ch_samples[channel][sample_index].
     /// Each sample is a CF32 complex<float> (I + jQ).
     std::vector<std::vector<std::complex<float>>> ch_samples;

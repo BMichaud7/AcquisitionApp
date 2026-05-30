@@ -42,8 +42,11 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         cfg.scanner_id = el->GetText() ? el->GetText() : cfg.scanner_id;
     if (auto* el = opt(root, "rank"))
         el->QueryIntText(&cfg.rank);
-    if (auto* el = opt(root, "analysis_pause_ms"))
-        el->QueryIntText(&cfg.analysis_pause_ms);
+    if (auto* el = opt(root, "analysis_pause_ms")) {
+        int pause_ms_raw = 0;
+        el->QueryIntText(&pause_ms_raw);
+        cfg.analysis_pause_ms = au::milli(au::seconds)(pause_ms_raw);
+    }
     if (auto* el = opt(root, "scan_device_ids")) {
         std::istringstream ss(el->GetText() ? el->GetText() : "");
         std::string id;
@@ -77,24 +80,42 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
     // ── Device ───────────────────────────────────────────────────────────────
     auto* dev = need(root, "device");
     if (auto* el = opt(dev, "rx_channels"))    el->QueryIntText(&cfg.device.rx_channels);
-    if (auto* el = opt(dev, "sample_rate_sps"))el->QueryDoubleText(&cfg.device.sample_rate);
+    if (auto* el = opt(dev, "sample_rate_sps")) {
+        double sr_raw = 0.0;
+        el->QueryDoubleText(&sr_raw);
+        cfg.device.sample_rate = au::hertz(sr_raw);
+    }
     if (auto* el = opt(dev, "rx_gain_db"))     el->QueryDoubleText(&cfg.device.rx_gain_db);
-    if (auto* el = opt(dev, "bandwidth_hz"))   el->QueryDoubleText(&cfg.device.bandwidth_hz);
+    if (auto* el = opt(dev, "bandwidth_hz")) {
+        double bw_raw = 0.0;
+        el->QueryDoubleText(&bw_raw);
+        cfg.device.bandwidth_hz = au::hertz(bw_raw);
+    }
     cfg.device.rx_channels = std::max(1, cfg.device.rx_channels);
 
     // ── Sweep ────────────────────────────────────────────────────────────────
     auto* sweep = need(root, "sweep");
-    if (auto* el = opt(sweep, "start_hz"))          el->QueryUnsigned64Text(&cfg.sweep.start_hz);
-    if (auto* el = opt(sweep, "stop_hz"))           el->QueryUnsigned64Text(&cfg.sweep.stop_hz);
+    if (auto* el = opt(sweep, "start_hz")) {
+        uint64_t raw = 0; el->QueryUnsigned64Text(&raw);
+        cfg.sweep.start_hz = au::hertz(static_cast<double>(raw));
+    }
+    if (auto* el = opt(sweep, "stop_hz")) {
+        uint64_t raw = 0; el->QueryUnsigned64Text(&raw);
+        cfg.sweep.stop_hz = au::hertz(static_cast<double>(raw));
+    }
     if (auto* el = opt(sweep, "dwell_samples"))     el->QueryIntText(&cfg.sweep.dwell_samples);
     if (auto* el = opt(sweep, "fft_size"))          el->QueryIntText(&cfg.sweep.fft_size);
     if (auto* el = opt(sweep, "usable_bw_fraction"))el->QueryDoubleText(&cfg.sweep.usable_bw_fraction);
     if (auto* el = opt(sweep, "threshold_db"))      el->QueryDoubleText(&cfg.sweep.threshold_db);
-    if (auto* el = opt(sweep, "min_signal_bw_hz"))
-        el->QueryUnsigned64Text(reinterpret_cast<uint64_t*>(&cfg.sweep.min_signal_bw_hz));
+    if (auto* el = opt(sweep, "min_signal_bw_hz")) {
+        uint64_t raw = 0; el->QueryUnsigned64Text(&raw);
+        cfg.sweep.min_signal_bw_hz = au::hertz(static_cast<double>(raw));
+    }
     if (auto* el = opt(sweep, "settle_samples"))    el->QueryIntText(&cfg.sweep.settle_samples);
-    if (auto* el = opt(sweep, "dc_guard_hz"))
-        el->QueryUnsigned64Text(reinterpret_cast<uint64_t*>(&cfg.sweep.dc_guard_hz));
+    if (auto* el = opt(sweep, "dc_guard_hz")) {
+        uint64_t raw = 0; el->QueryUnsigned64Text(&raw);
+        cfg.sweep.dc_guard_hz = au::hertz(static_cast<double>(raw));
+    }
     if (auto* el = opt(sweep, "cfar_guard_bins"))   el->QueryIntText(&cfg.sweep.cfar_guard_bins);
     if (auto* el = opt(sweep, "cfar_ref_bins"))     el->QueryIntText(&cfg.sweep.cfar_ref_bins);
     if (auto* el = opt(sweep, "min_papr_db"))       el->QueryFloatText(&cfg.sweep.min_papr_db);

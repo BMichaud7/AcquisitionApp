@@ -4,6 +4,7 @@
 // Build via CMake target `acq_bench`; run from any working directory.
 
 #include "FftProcessor.hpp"
+#include <au/units/hertz.hh>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -111,13 +112,15 @@ int main() {
         // detectFromSpectrum alone (spectrum already computed)
         proc.computeSpectrum(sig.data(), N_SAMPLES);
         auto rd = timeit(WARMUP, REPS, [&]{
-            proc.detectFromSpectrum(10.f, 0.80f, SR, 1000, 50000, 3.f);
+            proc.detectFromSpectrum(10.f, 0.80f,
+                au::hertz(SR), au::hertz(1000), au::hertz(50000), 3.f);
         });
 
         // Full pipeline
         auto rt = timeit(WARMUP, REPS, [&]{
             proc.computeSpectrum(sig.data(), N_SAMPLES);
-            proc.detectFromSpectrum(10.f, 0.80f, SR, 1000, 50000, 3.f);
+            proc.detectFromSpectrum(10.f, 0.80f,
+                au::hertz(SR), au::hertz(1000), au::hertz(50000), 3.f);
         });
 
         double overhead_pct  = rt.mean_ms / receive_ms * 100.0;

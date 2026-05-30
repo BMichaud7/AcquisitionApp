@@ -1,4 +1,5 @@
 #include "FftProcessor.hpp"
+#include <au/units/hertz.hh>
 #include <cmath>
 #include <algorithm>
 #include <numeric>
@@ -120,22 +121,26 @@ float FftProcessor::estimateNoise(int start_bin, int end_bin) {
 
 // ── CA-CFAR signal detection ──────────────────────────────────────────────────
 std::vector<FftProcessor::Signal> FftProcessor::detectFromSpectrum(
-    float    threshold_db,
-    float    usable_fraction,
-    double   sample_rate,
-    uint32_t min_signal_bw_hz,
-    uint32_t dc_guard_hz,
-    float    min_papr_db,
+    float                    threshold_db,
+    float                    usable_fraction,
+    au::QuantityD<au::Hertz> sample_rate,
+    au::QuantityD<au::Hertz> min_signal_bw_hz,
+    au::QuantityD<au::Hertz> dc_guard_hz,
+    float                    min_papr_db,
     const std::vector<float>* hist_floor)
 {
+    const double sample_rate_hz = sample_rate.in(au::hertz);
+    const double min_bw_hz      = min_signal_bw_hz.in(au::hertz);
+    const double dc_guard_raw   = dc_guard_hz.in(au::hertz);
+
     int margin    = (int)(fft_size_ * (1.0 - usable_fraction) / 2.0);
     int start_bin = margin;
     int end_bin   = fft_size_ - 1 - margin;
 
     // Blank DC guard zone — suppresses LO leakage sidelobes
-    if (dc_guard_hz > 0) {
-        double bin_hz     = sample_rate / fft_size_;
-        int    guard_bins = std::max(1, (int)std::ceil(dc_guard_hz / bin_hz));
+    if (dc_guard_raw > 0) {
+        double bin_hz     = sample_rate_hz / fft_size_;
+        int    guard_bins = std::max(1, (int)std::ceil(dc_guard_raw / bin_hz));
         int    center_bin = fft_size_ / 2;
         int    g_lo = std::max(start_bin, center_bin - guard_bins);
         int    g_hi = std::min(end_bin,   center_bin + guard_bins);
@@ -164,8 +169,8 @@ std::vector<FftProcessor::Signal> FftProcessor::detectFromSpectrum(
 
     const int G = cfar_guard_;
     const int R = cfar_ref_;
-    const double bin_hz   = sample_rate / fft_size_;
-    const int    min_bins = std::max(1, (int)std::ceil(min_signal_bw_hz / bin_hz));
+    const double bin_hz   = sample_rate_hz / fft_size_;
+    const int    min_bins = std::max(1, (int)std::ceil(min_bw_hz / bin_hz));
 
     // ── Run detection with per-bin CA-CFAR threshold ──────────────────────────
     std::vector<Signal> signals;
@@ -227,7 +232,9 @@ std::vector<FftProcessor::Signal> FftProcessor::detectFromSpectrum(
 std::vector<FftProcessor::Signal> FftProcessor::detect(
     const std::complex<float>* samples,
     int n_samples, float threshold_db, float usable_fraction,
-    double sample_rate, uint32_t min_signal_bw_hz, uint32_t dc_guard_hz)
+    au::QuantityD<au::Hertz> sample_rate,
+    au::QuantityD<au::Hertz> min_signal_bw_hz,
+    au::QuantityD<au::Hertz> dc_guard_hz)
 {
     computeSpectrum(samples, n_samples);
     return detectFromSpectrum(threshold_db, usable_fraction, sample_rate,
@@ -235,11 +242,15 @@ std::vector<FftProcessor::Signal> FftProcessor::detect(
 }
 
 // ── Frequency conversion ──────────────────────────────────────────────────────
-uint64_t FftProcessor::binToHz(float bin, double sample_rate, uint64_t center_hz) const {
-    double offset = ((double)bin - fft_size_ / 2) * (sample_rate / fft_size_);
-    return (uint64_t)std::llround((double)center_hz + offset);
+au::QuantityD<au::Hertz> FftProcessor::binToHz(float bin,
+                                                au::QuantityD<au::Hertz> sample_rate,
+                                                au::QuantityD<au::Hertz> center_hz) const {
+    double offset = ((double)bin - fft_size_ / 2) * (sample_rate.in(au::hertz) / fft_size_);
+    return au::hertz(center_hz.in(au::hertz) + offset);
 }
-uint64_t FftProcessor::binToHz(int bin, double sample_rate, uint64_t center_hz) const {
+au::QuantityD<au::Hertz> FftProcessor::binToHz(int bin,
+                                                au::QuantityD<au::Hertz> sample_rate,
+                                                au::QuantityD<au::Hertz> center_hz) const {
     return binToHz((float)bin, sample_rate, center_hz);
 }
 

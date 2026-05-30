@@ -8,6 +8,8 @@
  * All sub-structs (AmqpConfig, DeviceConfig, SweepParams, etc.) are
  * populated from the corresponding XML elements.
  */
+#include <au/units/hertz.hh>
+#include <au/units/seconds.hh>
 #include <string>
 #include <cstdint>
 #include <stdexcept>
@@ -39,9 +41,9 @@ struct DbConfig {
 /// @brief SDR hardware configuration.
 struct DeviceConfig {
     int    rx_channels{1};       ///< Number of RX channels to request.
-    double sample_rate{10e6};    ///< Sample rate (samples/s).
+    au::QuantityD<au::Hertz> sample_rate{au::hertz(10e6)};    ///< Sample rate (samples/s).
     double rx_gain_db{40.0};     ///< RX gain (dB).
-    double bandwidth_hz{10e6};   ///< Requested RF bandwidth per channel (Hz).
+    au::QuantityD<au::Hertz> bandwidth_hz{au::hertz(10e6)};   ///< Requested RF bandwidth per channel.
 };
 
 /**
@@ -51,17 +53,17 @@ struct DeviceConfig {
  * See the README "Sweep parameters" table for the effect of each value.
  */
 struct SweepParams {
-    uint64_t start_hz{70'000'000};       ///< Sweep start frequency (Hz).
-    uint64_t stop_hz{1'000'000'000};     ///< Sweep stop frequency (Hz).
+    au::QuantityD<au::Hertz> start_hz{au::hertz(70'000'000.0)};    ///< Sweep start frequency.
+    au::QuantityD<au::Hertz> stop_hz{au::hertz(1'000'000'000.0)};  ///< Sweep stop frequency.
     int      dwell_samples{4096};        ///< IQ samples collected per dwell (≥ fft_size).
     int      fft_size{4096};             ///< FFT size (power of 2, ≥ 64).
     double   usable_bw_fraction{0.80};   ///< Fraction of FFT bins examined (discards roll-off edges).
     double   threshold_db{10.0};         ///< Detection threshold above local CA-CFAR noise (dB).
-    uint32_t min_signal_bw_hz{1'000};    ///< Minimum run width to report (Hz).
+    au::QuantityD<au::Hertz> min_signal_bw_hz{au::hertz(1'000.0)}; ///< Minimum run width to report.
     int      settle_samples{512};        ///< Samples discarded after each retune.
-    /// Bins within this many Hz of DC are blanked to suppress AD9361 LO leakage.
+    /// Bins within this range of DC are blanked to suppress AD9361 LO leakage.
     /// Set 0 to disable.
-    uint32_t dc_guard_hz{50'000};
+    au::QuantityD<au::Hertz> dc_guard_hz{au::hertz(50'000.0)};
     int      cfar_guard_bins{8};         ///< CA-CFAR guard cells each side of test bin.
     int      cfar_ref_bins{32};          ///< CA-CFAR reference cells each side for noise average.
     /// Minimum peak-to-mean power ratio (dB) for multi-bin runs.
@@ -86,10 +88,10 @@ struct ReceiverConfig {
 struct SweepConfig {
     std::string    scanner_id{"scanner-0"}; ///< Identifies this scanner in AMQP messages.
     int            rank{1};  ///< Preemption tier: 1=Acq (lowest), 2=Ana, 3=DF (highest).
-    /// Milliseconds to sleep after each sweep pass before re-submitting the SCAN task.
+    /// Duration to sleep after each sweep pass before re-submitting the SCAN task.
     /// Gives AnalysisApp (lower rank) a guaranteed window to grab the SDR.
     /// 0 = disabled (continuous sweep, no analysis window).
-    int            analysis_pause_ms{0};
+    au::QuantityD<au::Seconds> analysis_pause_ms{au::seconds(0.0)};
     /// Device IDs to scan simultaneously. Empty = scheduler picks any free device.
     /// Set in XML: <scan_device_ids>pluto-0 pluto-1</scan_device_ids>
     /// AcquisitionApp submits one SCAN task per device and scans them in parallel.

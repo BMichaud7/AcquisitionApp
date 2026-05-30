@@ -2,6 +2,8 @@
 #include "SpectrumScanner.hpp"
 #include "SoapyIqSource.hpp"
 #include "FakeAcqSoapyControl.hpp"
+#include <au/units/hertz.hh>
+#include <au/units/seconds.hh>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -18,16 +20,16 @@ static SweepConfig makeTestConfig(bool shared_lo = false, int rx_channels = 1) {
     SweepConfig cfg;
     cfg.scanner_id                = "test-scanner";
     cfg.device.rx_channels        = rx_channels;
-    cfg.device.sample_rate        = 10e6;
+    cfg.device.sample_rate        = au::hertz(10e6);
     cfg.device.rx_gain_db         = 40.0;
-    cfg.device.bandwidth_hz       = 10e6;
-    cfg.sweep.start_hz            = 100'000'000;   // 100 MHz
-    cfg.sweep.stop_hz             = 108'000'000;   // 108 MHz — exactly one dwell step (step = sr*usable = 8 MHz)
+    cfg.device.bandwidth_hz       = au::hertz(10e6);
+    cfg.sweep.start_hz            = au::hertz(100'000'000.0);  // 100 MHz
+    cfg.sweep.stop_hz             = au::hertz(108'000'000.0);  // 108 MHz — exactly one dwell step
     cfg.sweep.dwell_samples       = 256;
     cfg.sweep.fft_size            = 256;
     cfg.sweep.usable_bw_fraction  = 0.80;
     cfg.sweep.threshold_db        = 15.0;  // suppress Hann sidelobe fragments while keeping main lobe
-    cfg.sweep.min_signal_bw_hz    = 1000;
+    cfg.sweep.min_signal_bw_hz    = au::hertz(1000.0);
     cfg.sweep.settle_samples      = 0;
     return cfg;
 }
@@ -131,10 +133,10 @@ TEST_F(SpectrumScannerTest, DetectionHasReasonableMetadata) {
     ASSERT_TRUE(got.load()) << "Did not receive a detection in time";
     EXPECT_EQ(captured.scanner_id, "test-scanner");
     EXPECT_EQ(captured.channel, 0);
-    EXPECT_GT(captured.bandwidth_hz, 0u);
+    EXPECT_GT(captured.bandwidth_hz.in(au::hertz), 0.0);
     EXPECT_GT(captured.power_db, -50.0f);
 
-    const double fc = static_cast<double>(captured.center_freq_hz);
+    const double fc = captured.center_freq_hz.in(au::hertz);
     EXPECT_GT(fc, 100e6);
     EXPECT_LT(fc, 108e6);
 }
@@ -187,7 +189,7 @@ TEST_F(SpectrumScannerTest, SnapshotSampleRateMatchesConfig) {
 
     ASSERT_TRUE(got.load());
     // makeTestConfig sets sample_rate = 10 MHz
-    EXPECT_NEAR(captured.snapshot_sample_rate_sps, 10e6, 1.0)
+    EXPECT_NEAR(captured.snapshot_sample_rate_sps.in(au::hertz), 10e6, 1.0)
         << "snapshot_sample_rate_sps must match the configured device sample rate";
 }
 
@@ -298,7 +300,8 @@ TEST_F(SpectrumScannerTest, DetectionCenterFreqIsInSweepRange) {
     ASSERT_FALSE(detections.empty());
     for (const auto& d : detections) {
         // Allow half-bin margin (~40 kHz) for quantization at FFT bin edges
-        EXPECT_GE(d.center_freq_hz,  99'960'000ULL);
-        EXPECT_LE(d.center_freq_hz, 108'000'000ULL);
+        const double fc = d.center_freq_hz.in(au::hertz);
+        EXPECT_GE(fc,  99'960'000.0);
+        EXPECT_LE(fc, 108'000'000.0);
     }
 }
