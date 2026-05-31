@@ -168,8 +168,11 @@ else()
 endif()
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
-enable_testing()
-add_subdirectory(tests)
+include(CTest)
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # ── Install ───────────────────────────────────────────────────────────────────
 install(FILES config/scanner.xml
