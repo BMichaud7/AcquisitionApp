@@ -13,7 +13,8 @@
  */
 #include "Types.hpp"
 #include <au/units/seconds.hh>
-#include <pqxx/pqxx>
+
+#include <au/prefix.hh>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
@@ -70,4 +71,4 @@ private:
     void flush(std::vector<Detection>& batch);
 };
 
-} // namespace acq
+#include <pqxx/pqxx>
