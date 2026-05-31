@@ -48,6 +48,9 @@ RUN cmake -B build \
         -S . \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/install \
+        -DBUILD_TESTING=OFF \
+        -DWITH_DB=ON \
+        -DFETCHCONTENT_QUIET=OFF \
     && cmake --build build --parallel "$(nproc)" \
     && cmake --install build
 

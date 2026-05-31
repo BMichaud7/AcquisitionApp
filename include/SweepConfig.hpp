@@ -10,6 +10,7 @@
  */
 #include <au/units/hertz.hh>
 #include <au/units/seconds.hh>
+#include <au/prefix.hh>
 #include <string>
 #include <cstdint>
 #include <stdexcept>
