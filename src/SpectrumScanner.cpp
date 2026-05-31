@@ -224,3 +224,4 @@ std::vector<Detection> SpectrumScanner::processDwell(
 
     return out;
 }
+} // namespace acq
