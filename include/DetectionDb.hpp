@@ -70,3 +70,5 @@ private:
     void workerLoop();
     void flush(std::vector<Detection>& batch);
 };
+
+} // namespace acq
