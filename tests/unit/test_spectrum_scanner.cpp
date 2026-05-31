@@ -169,7 +169,7 @@ TEST_F(SpectrumScannerTest, DetectionHasIqSnapshot) {
         << "Snapshot size must be even (interleaved I,Q pairs)";
     EXPECT_LE(captured.iq_snapshot->size(), 2048u)
         << "Snapshot must not exceed 1 024 complex samples";
-    EXPECT_GT(captured.snapshot_sample_rate_sps, 0.0)
+    EXPECT_GT(captured.snapshot_sample_rate_sps.in(au::hertz), 0.0)
         << "snapshot_sample_rate_sps must be positive";
 }
 

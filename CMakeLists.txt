@@ -83,16 +83,20 @@ endif()
 find_package(spdlog QUIET)
 if(NOT spdlog_FOUND)
     pkg_check_modules(SPDLOG QUIET IMPORTED_TARGET spdlog)
-    if(NOT SPDLOG_FOUND)
-        message(FATAL_ERROR
-            "\n[AcquisitionApp] spdlog not found.\n"
-            "  Ubuntu/Debian : sudo apt-get install libspdlog-dev\n"
-            "  CentOS/RHEL   : build from source — see Containerfile.test\n")
+    if(SPDLOG_FOUND)
+        add_library(spdlog::spdlog INTERFACE IMPORTED)
+        target_include_directories(spdlog::spdlog INTERFACE ${SPDLOG_INCLUDE_DIRS})
+        target_link_libraries(spdlog::spdlog INTERFACE ${SPDLOG_LIBRARIES})
+        target_compile_definitions(spdlog::spdlog INTERFACE SPDLOG_FMT_EXTERNAL)
+    else()
+        message(STATUS "[AcquisitionApp] spdlog not found via pkg-config; fetching v1.14.1")
+        include(FetchContent)
+        FetchContent_Declare(spdlog
+            GIT_REPOSITORY https://github.com/gabime/spdlog.git
+            GIT_TAG        v1.14.1
+            GIT_SHALLOW    TRUE)
+        FetchContent_MakeAvailable(spdlog)
     endif()
-    add_library(spdlog::spdlog INTERFACE IMPORTED)
-    target_include_directories(spdlog::spdlog INTERFACE ${SPDLOG_INCLUDE_DIRS})
-    target_link_libraries(spdlog::spdlog INTERFACE ${SPDLOG_LIBRARIES})
-    target_compile_definitions(spdlog::spdlog INTERFACE SPDLOG_FMT_EXTERNAL)
 endif()
 
 # ── Optional — production binary only ─────────────────────────────────────────
