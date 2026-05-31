@@ -13,8 +13,8 @@
  */
 #include "Types.hpp"
 #include <au/units/seconds.hh>
-
 #include <au/prefix.hh>
+#include <pqxx/pqxx>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
@@ -70,5 +70,3 @@ private:
     void workerLoop();
     void flush(std::vector<Detection>& batch);
 };
-
-#include <pqxx/pqxx>
