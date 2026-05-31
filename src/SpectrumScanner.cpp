@@ -1,7 +1,7 @@
 #include "SpectrumScanner.hpp"
 #include <au/units/seconds.hh>
-
 #include <au/prefix.hh>
+#include <spdlog/spdlog.h>
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -224,5 +224,3 @@ std::vector<Detection> SpectrumScanner::processDwell(
 
     return out;
 }
-
-#include <spdlog/spdlog.h>
