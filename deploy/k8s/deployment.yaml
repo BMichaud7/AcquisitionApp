@@ -157,7 +157,7 @@ spec:
 
       containers:
         - name: sdr-acquisition
-          image: ghcr.io/bmichaud7/sdr-acquisition:1.4.0
+          image: ghcr.io/bmichaud7/sdr-acquisition:1.5.0
           imagePullPolicy: Always
 
           env:
