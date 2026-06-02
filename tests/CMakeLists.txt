@@ -38,9 +38,11 @@ add_executable(acq_tests
     unit/test_fft_processor.cpp
     unit/test_sweep_config.cpp
     unit/test_spectrum_scanner.cpp
+    unit/test_p25_grant_consumer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/FftProcessor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/SweepConfig.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/SpectrumScanner.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/P25GrantConsumer.cpp
 )
 
 target_include_directories(acq_tests PRIVATE
@@ -53,6 +55,7 @@ target_include_directories(acq_tests PRIVATE
 
 target_link_libraries(acq_tests PRIVATE
     GTest::gtest_main
+    nlohmann_json::nlohmann_json
     Au::au
     SoapySDR
     PkgConfig::FFTW3F
