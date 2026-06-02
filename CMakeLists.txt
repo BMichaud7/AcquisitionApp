@@ -156,6 +156,7 @@ if(PROTON_FOUND AND PQXX_FOUND)
         src/DetectionDb.cpp
         src/AmqpPublisher.cpp
         src/P25GrantConsumer.cpp
+        src/P25Db.cpp
     )
     target_include_directories(sdr_acquisition PRIVATE include)
     target_link_libraries(sdr_acquisition PRIVATE

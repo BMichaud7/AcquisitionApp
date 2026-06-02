@@ -16,6 +16,7 @@
 #include "DetectionDb.hpp"
 #include "AmqpPublisher.hpp"
 #include "P25GrantConsumer.hpp"
+#include "P25Db.hpp"
 #include <au/units/hertz.hh>
 #include <au/units/seconds.hh>
 #include <au/prefix.hh>
@@ -135,6 +136,17 @@ int main(int argc, char* argv[]) {
         spdlog::info("[P25] grant consumer enabled — topic={} capture={:.1f}s",
                      cfg.p25.grant_topic, cfg.p25.capture_s);
 
+        // P25 channel DB writer
+        std::shared_ptr<acq::P25Db> p25db;
+        if (db_ok) {
+            try {
+                p25db = std::make_shared<acq::P25Db>(cfg.db.connection_string());
+                spdlog::info("[P25] p25_channels table connected");
+            } catch (const std::exception& e) {
+                spdlog::warn("[P25] DB unavailable: {}", e.what());
+            }
+        }
+
         // Build a one-shot IQ source for voice channel captures
         // (separate from the sweep scanner sources so grants don't interrupt sweeps)
         auto p25_src = std::make_unique<acq::TaskManagerIqSource>(cfg, "", cfg.p25.rank);
@@ -142,10 +154,13 @@ int main(int argc, char* argv[]) {
         p25 = std::make_unique<acq::P25GrantConsumer>(
             cfg.amqp.url, cfg.amqp.username, cfg.amqp.password,
             cfg.p25.grant_topic,
-            [&on_detection, &cfg, p25_src = p25_src.get()](const acq::P25Grant& g) {
+            [&on_detection, &cfg, p25_src = p25_src.get(), p25db](const acq::P25Grant& g) {
 
                 spdlog::info("[P25] tuning to TG={} @ {:.4f}MHz for {:.1f}s",
                              g.talk_group, g.freq_hz / 1e6, cfg.p25.capture_s);
+
+                // Record voice channel grant in p25_channels
+                if (p25db) p25db->upsert_grant(g);
 
                 // Build a temporary sweep config for the voice channel
                 // (narrow: ±6.25 kHz around centre, 12.5 kHz BW, single step)

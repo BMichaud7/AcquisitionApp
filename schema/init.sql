@@ -53,6 +53,61 @@ CREATE INDEX IF NOT EXISTS idx_signals_hyp      ON signals (hypothesis);
 CREATE INDEX IF NOT EXISTS idx_signals_unclass  ON signals (classified, last_seen DESC)
     WHERE classified = false;
 
+-- ── P25 trunked system channel catalog ───────────────────────────────────────
+-- Populated by AcquisitionApp P25GrantConsumer as grants are observed.
+-- The control channel row is inserted by DemodApp P25Monitor on startup.
+
+CREATE TABLE IF NOT EXISTS p25_channels (
+    id              BIGSERIAL           PRIMARY KEY,
+    first_seen      TIMESTAMPTZ         NOT NULL DEFAULT now(),
+    last_seen       TIMESTAMPTZ         NOT NULL DEFAULT now(),
+
+    -- Site identity (from RFSS_STATUS_BCAST TSBK)
+    wacn            INTEGER             NOT NULL DEFAULT 0,    -- Wideband Area Comm Network ID
+    sys_id          INTEGER             NOT NULL DEFAULT 0,    -- System ID
+    rfss_id         SMALLINT            NOT NULL DEFAULT 0,
+    site_id         SMALLINT            NOT NULL DEFAULT 0,
+
+    -- Channel info
+    freq_hz         DOUBLE PRECISION    NOT NULL,
+    freq_mhz        DOUBLE PRECISION    GENERATED ALWAYS AS (round((freq_hz/1e6)::numeric,4)) STORED,
+    channel_iden    SMALLINT,           -- Channel identifier from IDEN_UP
+    channel_num     INTEGER,            -- Channel number within band
+
+    -- Channel role
+    is_control      BOOLEAN             NOT NULL DEFAULT false, -- TRUE for the control channel
+    talk_group      INTEGER,            -- NULL for control channel; TG ID for voice channels
+    source_id       INTEGER,            -- Originating unit ID (voice channels)
+    encrypted       BOOLEAN             NOT NULL DEFAULT false,
+    emergency       BOOLEAN             NOT NULL DEFAULT false,
+
+    -- Grant count (how many times we've seen traffic on this channel)
+    grant_count     INTEGER             NOT NULL DEFAULT 1,
+
+    UNIQUE (freq_hz, talk_group)
+);
+
+CREATE INDEX IF NOT EXISTS idx_p25_site   ON p25_channels (wacn, sys_id, rfss_id, site_id);
+CREATE INDEX IF NOT EXISTS idx_p25_freq   ON p25_channels (freq_hz);
+CREATE INDEX IF NOT EXISTS idx_p25_tg     ON p25_channels (talk_group);
+CREATE INDEX IF NOT EXISTS idx_p25_ctrl   ON p25_channels (is_control) WHERE is_control = true;
+
+-- Convenience view: all P25 channels for the most recently active site
+CREATE OR REPLACE VIEW p25_site_channels AS
+SELECT
+    CASE WHEN is_control THEN 'CONTROL' ELSE 'VOICE' END  AS role,
+    freq_mhz,
+    talk_group,
+    encrypted,
+    emergency,
+    grant_count,
+    to_char(last_seen, 'HH24:MI:SS')                      AS last_seen,
+    lpad(to_hex(wacn),  5, '0')                            AS wacn,
+    lpad(to_hex(sys_id),3, '0')                            AS sys_id
+FROM p25_channels
+WHERE last_seen > now() - interval '1 hour'
+ORDER BY is_control DESC, grant_count DESC;
+
 -- ── Views ─────────────────────────────────────────────────────────────────────
 -- Drop old views from previous schema versions before recreating.
 DROP VIEW IF EXISTS recent_detections;
