@@ -180,7 +180,8 @@ parent/
 | `libtinyxml2-dev` | All | Config file parser |
 | `libfftw3-dev` | All | FFT-based signal detection |
 | `libfmt-dev` | All | Logging formatting |
-| `libspdlog-dev` | All | Structured logging |
+| `libspdlog-dev` ≥ 1.14.1 | All | Structured logging (auto-fetched by CMake if absent) |
+| Au units 0.5.1 | All | Zero-overhead physical units (auto-fetched by CMake) |
 | `libsoapysdr-dev` | Unit tests | `FakeAcqSoapyDevice` in test binary |
 | `googletest` | Unit tests | Auto-fetched via FetchContent |
 | `libqpid-proton-cpp12-dev` | `sdr_acquisition` binary only | AMQP broker connection |
@@ -209,7 +210,7 @@ git clone https://github.com/BMichaud7/SdrTaskApi.git ../SdrTaskApi
 
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel $(nproc)
-ctest --test-dir build --output-on-failure     # 61 unit tests
+ctest --test-dir build/tests --output-on-failure  # 64 unit tests
 ./build/tests/acq_bench                        # benchmark
 ```
 
