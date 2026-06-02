@@ -33,7 +33,8 @@ jobs:
           cmake -S /tmp/libpqxx -B /tmp/libpqxx/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_TEST=OFF -DBUILD_DOC=OFF
+            -DBUILD_TEST=OFF -DBUILD_DOC=OFF \
+            -DPostgreSQL_TYPE_INCLUDE_DIR=/usr/include/postgresql
           cmake --build /tmp/libpqxx/build --parallel
           sudo cmake --install /tmp/libpqxx/build
 

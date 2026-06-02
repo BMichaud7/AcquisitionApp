@@ -129,7 +129,15 @@ if(NOT PROTON_FOUND)
 endif()
 
 pkg_check_modules(PQXX QUIET IMPORTED_TARGET libpqxx)
-if(NOT PQXX_FOUND)
+if(PQXX_FOUND)
+    # Ubuntu 24.04's libpqxx.pc omits -lpq from Libs; add it explicitly so
+    # the linker finds PQconnectStart etc. when linking a static libpqxx.
+    find_library(LIBPQ_LIB NAMES pq)
+    if(LIBPQ_LIB)
+        set_property(TARGET PkgConfig::PQXX APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES "${LIBPQ_LIB}")
+    endif()
+else()
     message(STATUS
         "[AcquisitionApp] libpqxx not found — "
         "sdr_acquisition binary will be skipped.\n"
