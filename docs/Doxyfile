@@ -1,5 +1,5 @@
 PROJECT_NAME           = "AcquisitionApp"
-PROJECT_NUMBER         = "1.2"
+PROJECT_NUMBER         = "1.5.0"
 PROJECT_BRIEF          = "Spectrum scanner — submits SCAN tasks, detects signals via FFT/CFAR"
 PROJECT_LOGO           =
 OUTPUT_DIRECTORY       = docs
