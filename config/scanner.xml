@@ -72,4 +72,17 @@
     <port>0</port>
   </receiver>
 
+  <!-- P25 trunked voice channel follower (disabled by default).
+       Enable to have AcquisitionApp retune to voice channels when DemodApp
+       publishes channel grants on rf.p25.grants.
+       tg_whitelist: space-separated talk group IDs to follow (empty = all).
+       Audio decoding (IMBE→PCM→SpeechApp) is not wired here. -->
+  <p25>
+    <enabled>false</enabled>
+    <grant_topic>rf.p25.grants</grant_topic>
+    <capture_s>3.0</capture_s>
+    <rank>3</rank>
+    <tg_whitelist></tg_whitelist>
+  </p25>
+
 </sdr_acquisition>

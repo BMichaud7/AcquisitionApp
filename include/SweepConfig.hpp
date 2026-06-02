@@ -86,6 +86,15 @@ struct ReceiverConfig {
  *
  * Loaded from scanner.xml via SweepConfig::from_file().
  */
+/// P25 trunked-system voice channel follower config.
+struct P25Config {
+    bool        enabled     = false;
+    std::string grant_topic = "rf.p25.grants"; ///< Published by DemodApp P25Monitor
+    double      capture_s   = 3.0;             ///< IQ capture per voice channel grant
+    int         rank        = 3;               ///< Priority rank for voice captures
+    std::vector<uint32_t> tg_whitelist;        ///< empty = all talk groups
+};
+
 struct SweepConfig {
     std::string    scanner_id{"scanner-0"}; ///< Identifies this scanner in AMQP messages.
     int            rank{1};  ///< Preemption tier: 1=Acq (lowest), 2=Ana, 3=DF (highest).
@@ -102,6 +111,7 @@ struct SweepConfig {
     DeviceConfig   device;
     SweepParams    sweep;
     ReceiverConfig receiver;
+    P25Config      p25;       ///< P25 grant follower (disabled by default)
 
     /**
      * @brief Load SweepConfig from an XML file.

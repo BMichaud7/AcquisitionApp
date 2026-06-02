@@ -155,6 +155,7 @@ if(PROTON_FOUND AND PQXX_FOUND)
         src/TaskManagerIqSource.cpp
         src/DetectionDb.cpp
         src/AmqpPublisher.cpp
+        src/P25GrantConsumer.cpp
     )
     target_include_directories(sdr_acquisition PRIVATE include)
     target_link_libraries(sdr_acquisition PRIVATE

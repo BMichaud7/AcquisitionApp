@@ -15,13 +15,18 @@
 #include "TaskManagerIqSource.hpp"
 #include "DetectionDb.hpp"
 #include "AmqpPublisher.hpp"
+#include "P25GrantConsumer.hpp"
 #include <au/units/hertz.hh>
+#include <au/units/seconds.hh>
+#include <au/prefix.hh>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <nlohmann/json.hpp>
 #include <csignal>
 #include <atomic>
 #include <memory>
 #include <string>
+#include <chrono>
 
 static std::atomic<bool> g_running{true};
 static void sigHandler(int) { g_running = false; }
@@ -121,10 +126,60 @@ int main(int argc, char* argv[]) {
 
     for (auto& s : scanners) s->start();
 
+    // ── P25 grant consumer — retune to voice channel on grant ─────────────
+    // Reads rf.p25.grants; for each whitelisted TG, submits a priority
+    // NARROWBAND capture and publishes the resulting detections.
+    // Audio decoding (IMBE→PCM→SpeechApp) is not wired yet.
+    std::unique_ptr<acq::P25GrantConsumer> p25;
+    if (cfg.p25.enabled) {
+        spdlog::info("[P25] grant consumer enabled — topic={} capture={:.1f}s",
+                     cfg.p25.grant_topic, cfg.p25.capture_s);
+
+        // Build a one-shot IQ source for voice channel captures
+        // (separate from the sweep scanner sources so grants don't interrupt sweeps)
+        auto p25_src = std::make_unique<acq::TaskManagerIqSource>(cfg, "", cfg.p25.rank);
+
+        p25 = std::make_unique<acq::P25GrantConsumer>(
+            cfg.amqp.url, cfg.amqp.username, cfg.amqp.password,
+            cfg.p25.grant_topic,
+            [&on_detection, &cfg, p25_src = p25_src.get()](const acq::P25Grant& g) {
+
+                spdlog::info("[P25] tuning to TG={} @ {:.4f}MHz for {:.1f}s",
+                             g.talk_group, g.freq_hz / 1e6, cfg.p25.capture_s);
+
+                // Build a temporary sweep config for the voice channel
+                // (narrow: ±6.25 kHz around centre, 12.5 kHz BW, single step)
+                acq::SweepConfig vcfg = cfg;
+                vcfg.sweep.start_hz  = au::hertz(g.freq_hz - 6250.0);
+                vcfg.sweep.stop_hz   = au::hertz(g.freq_hz + 6250.0);
+                // Override scanner_id to tag detections with talk group
+                vcfg.scanner_id = cfg.scanner_id + "-tg" + std::to_string(g.talk_group);
+
+                // Submit NARROWBAND capture via the dedicated P25 IQ source
+                // The source's sweepLoop will fire on_detection for each signal found.
+                // We pass through on_detection unchanged — detections appear on
+                // rf.detections tagged with the modified scanner_id (tg<N>).
+                acq::SpectrumScanner voice_scanner(vcfg, p25_src, on_detection);
+                voice_scanner.start();
+
+                // Capture for grant duration then stop
+                std::this_thread::sleep_for(
+                    std::chrono::duration<double>(cfg.p25.capture_s));
+                voice_scanner.stop();
+
+                spdlog::info("[P25] TG={} capture complete", g.talk_group);
+            });
+
+        // Transfer ownership of p25_src into the closure via shared_ptr
+        // (p25_src unique_ptr must outlive p25 consumer)
+        p25->start();
+    }
+
     spdlog::info("Running — Ctrl+C to stop");
     while (g_running) std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     spdlog::info("Stopping...");
+    if (p25) p25->stop();
     for (auto& s : scanners) s->stop();
     amqp.reset();
     db.reset();

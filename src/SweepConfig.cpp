@@ -53,6 +53,29 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         while (ss >> id) cfg.scan_device_ids.push_back(id);
     }
 
+    // ── P25 grant follower ───────────────────────────────────────────────────
+    if (auto* p25 = opt(root, "p25")) {
+        auto boolopt = [&](const char* tag, bool def) -> bool {
+            if (auto* e = opt(p25, tag)) {
+                std::string v = e->GetText() ? e->GetText() : "";
+                return (v == "true" || v == "1" || v == "yes");
+            }
+            return def;
+        };
+        cfg.p25.enabled     = boolopt("enabled", false);
+        cfg.p25.grant_topic = textOrDefault(opt(p25, "grant_topic"),
+                                             cfg.p25.grant_topic.c_str());
+        if (auto* e = opt(p25, "capture_s"))
+            cfg.p25.capture_s = std::stod(e->GetText() ? e->GetText() : "3.0");
+        if (auto* e = opt(p25, "rank"))
+            cfg.p25.rank = std::stoi(e->GetText() ? e->GetText() : "3");
+        if (auto* e = opt(p25, "tg_whitelist")) {
+            std::istringstream ss(e->GetText() ? e->GetText() : "");
+            uint32_t tg;
+            while (ss >> tg) cfg.p25.tg_whitelist.push_back(tg);
+        }
+    }
+
     // ── AMQP ────────────────────────────────────────────────────────────────
     if (auto* amqp = opt(root, "amqp")) {
         cfg.amqp.url                 = textOrDefault(opt(amqp, "url"), cfg.amqp.url.c_str());
