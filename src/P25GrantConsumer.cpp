@@ -42,11 +42,15 @@ public:
             g.encrypted  = j.value("encrypted",   false);
             g.emergency  = j.value("emergency",   false);
             g.ts_ms      = j.value("timestamp_ms", (int64_t)0);
+            g.alg_id     = static_cast<uint8_t>(j.value("alg_id",  0xFF));
+            g.key_id     = static_cast<uint16_t>(j.value("key_id", 0));
+            g.alg_name   = j.value("alg_name", std::string{});
 
             if (g.freq_hz <= 0) { d.accept(); return; }
 
-            spdlog::info("[P25GrantConsumer] grant TG={} freq={:.4f}MHz enc={}",
-                         g.talk_group, g.freq_hz / 1e6, g.encrypted);
+            spdlog::info("[P25GrantConsumer] grant TG={} freq={:.4f}MHz enc={} alg={}",
+                         g.talk_group, g.freq_hz / 1e6, g.encrypted,
+                         g.alg_name.empty() ? "unknown" : g.alg_name);
             owner_.enqueue(g);
         } catch (const std::exception& e) {
             spdlog::warn("[P25GrantConsumer] bad message: {}", e.what());

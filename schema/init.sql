@@ -81,6 +81,11 @@ CREATE TABLE IF NOT EXISTS p25_channels (
     encrypted       BOOLEAN             NOT NULL DEFAULT false,
     emergency       BOOLEAN             NOT NULL DEFAULT false,
 
+    -- Encryption info — populated from voice channel HDU
+    alg_id          SMALLINT,           -- ALGID byte: 0x00=Clear 0x04=AES-256 0x41=DVP 0x03=3TDEA
+    alg_name        TEXT,               -- Human-readable: Clear / AES-256 / DVP (DES-OFB) / etc.
+    key_id          INTEGER,            -- Key ID from HDU (identifies key slot in KMF)
+
     -- Grant count (how many times we've seen traffic on this channel)
     grant_count     INTEGER             NOT NULL DEFAULT 1,
 
@@ -100,6 +105,7 @@ SELECT
     talk_group,
     encrypted,
     emergency,
+    alg_name,
     grant_count,
     to_char(last_seen, 'HH24:MI:SS')                      AS last_seen,
     lpad(to_hex(wacn),  5, '0')                            AS wacn,

@@ -45,6 +45,10 @@ struct P25Grant {
     bool        encrypted;
     bool        emergency;
     int64_t     ts_ms;
+    // Encryption algorithm — 0xFF = unknown (HDU not yet decoded for this TG)
+    uint8_t     alg_id  = 0xFF;  ///< Raw ALGID byte: 0x00=Clear 0x04=AES-256 0x41=DVP…
+    uint16_t    key_id  = 0;     ///< Key ID (identifies key in KMF)
+    std::string alg_name;        ///< Human-readable algorithm name
 };
 
 /// Called when a grant is received — the consumer owns tuning to freq_hz.
