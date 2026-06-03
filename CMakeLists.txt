@@ -29,6 +29,16 @@ FetchContent_Declare(Au
     GIT_SHALLOW    TRUE)
 FetchContent_MakeAvailable(Au)
 
+# ── nlohmann/json ─────────────────────────────────────────────────────────────
+find_package(nlohmann_json QUIET)
+if(NOT nlohmann_json_FOUND)
+    FetchContent_Declare(nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG        v3.11.3
+        GIT_SHALLOW    TRUE)
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
 # ── SdrSdk (provides sdr_task_api types via its subdirectory) ─────────────────
 # Expected as a sibling directory: ../SdrSdk  (same parent as this repo).
 # SdrSdk itself expects ../SdrTaskApi as its own sibling.
@@ -162,6 +172,7 @@ if(PROTON_FOUND AND PQXX_FOUND)
     target_link_libraries(sdr_acquisition PRIVATE
         sdr_task_api
         Au::au
+        nlohmann_json::nlohmann_json
         PkgConfig::PROTON
         PkgConfig::TINYXML2
         PkgConfig::FFTW3F
