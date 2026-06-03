@@ -175,3 +175,32 @@ FROM signals
 WHERE classified = true
   AND last_seen > now() - interval '60 seconds'
 ORDER BY last_seen DESC;
+
+-- ── RF Alerts (jamming / spoofing / anomaly detection) ──────────────────────
+CREATE TABLE IF NOT EXISTS rf_alerts (
+    id           BIGSERIAL PRIMARY KEY,
+    detected_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    alert_type   TEXT NOT NULL,        -- GPS_JAMMING, ADSB_SPOOFING, etc.
+    severity     TEXT NOT NULL,        -- LOW / MEDIUM / HIGH / CRITICAL
+    freq_mhz     DOUBLE PRECISION,     -- centre frequency of threat (null if N/A)
+    power_db     REAL,                 -- measured power
+    baseline_db  REAL,                 -- expected baseline (for delta calc)
+    scanner_id   TEXT,
+    details      TEXT NOT NULL         -- human-readable description
+);
+
+CREATE INDEX IF NOT EXISTS rf_alerts_detected_at_idx ON rf_alerts (detected_at DESC);
+CREATE INDEX IF NOT EXISTS rf_alerts_type_idx        ON rf_alerts (alert_type);
+
+CREATE OR REPLACE VIEW recent_alerts AS
+SELECT
+    to_char(detected_at, 'YYYY-MM-DD HH24:MI:SS') AS time,
+    alert_type,
+    severity,
+    round(freq_mhz::numeric, 4)                    AS freq_mhz,
+    round(power_db::numeric, 1)                    AS power_db,
+    round((power_db - baseline_db)::numeric, 1)    AS delta_db,
+    details
+FROM rf_alerts
+WHERE detected_at > now() - INTERVAL '1 hour'
+ORDER BY detected_at DESC;
