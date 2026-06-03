@@ -55,7 +55,7 @@ void P25Db::upsert_grant(const P25Grant& g,
         if (g.encrypted) {
             // Use HDU info if available; otherwise mark as "Encrypted (unknown alg)"
             alg_id_opt   = static_cast<int>(g.alg_id);
-            alg_name_opt = std::string(g.alg_name());
+            alg_name_opt = g.alg_name;
             if (g.key_id) key_id_opt = static_cast<int>(g.key_id);
         }
 
