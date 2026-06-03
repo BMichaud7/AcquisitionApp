@@ -86,6 +86,33 @@ struct ReceiverConfig {
  *
  * Loaded from scanner.xml via SweepConfig::from_file().
  */
+/**
+ * @brief Threat detection configuration (GPS jamming/spoofing, content-layer validators).
+ *
+ * Controls which threat monitors are active. All disabled by default so the
+ * system behaves identically to a version without threat detection unless
+ * explicitly enabled in scanner.xml.
+ */
+struct ThreatConfig {
+    bool enabled{false};              ///< Master switch — disables all threat detection when false.
+
+    // ── GPS frequency monitoring ─────────────────────────────────────────────
+    bool gps_enabled{false};          ///< Scan L1/L2/L5 for jammers and spoofers.
+    double gps_jammer_threshold_db{20.0}; ///< dB above EMA baseline to declare jamming.
+    double gps_spoof_detectable_dbm{-110.0}; ///< Any GPS-band signal above this = spoofing suspect.
+    double gps_check_interval_s{30.0};   ///< Seconds between L1/L2/L5 checks.
+
+    // ── Content-layer validators (run inside DemodApp demodulators) ──────────
+    bool adsb_enabled{true};          ///< ADS-B physics validation (impossible altitude/speed/CRC rate).
+    bool ais_enabled{true};           ///< AIS impossible vessel speed / invalid MMSI.
+    bool eas_enabled{true};           ///< EAS/SAME invalid originator or rare event code.
+    bool dsc_enabled{true};           ///< DSC distress call MMSI anomaly detection.
+    bool p25_rogue_enabled{true};     ///< P25 rogue site (unexpected WACN change).
+
+    // ── Alert persistence ────────────────────────────────────────────────────
+    std::string alert_topic{"rf.alerts"}; ///< AMQP topic alerts are published to by DemodApp.
+};
+
 /// P25 trunked-system voice channel follower config.
 struct P25Config {
     bool        enabled     = false;
@@ -112,6 +139,7 @@ struct SweepConfig {
     SweepParams    sweep;
     ReceiverConfig receiver;
     P25Config      p25;       ///< P25 grant follower (disabled by default)
+    ThreatConfig   threat;    ///< Threat detection monitors (all disabled by default)
 
     /**
      * @brief Load SweepConfig from an XML file.

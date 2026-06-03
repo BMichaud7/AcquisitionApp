@@ -72,6 +72,37 @@
     <port>0</port>
   </receiver>
 
+  <!-- ── Threat detection ─────────────────────────────────────────────────── -->
+  <!-- Master switch: set <enabled> to true to activate any sub-feature.
+       GPS monitor requires hardware capable of reaching L1 (1575 MHz) —
+       RTL-SDR v3 tops out at ~1.7 GHz (marginal); HackRF/USRP recommended.
+       Content-layer validators (ADS-B, AIS, etc.) run inside DemodApp and
+       are controlled by the matching flags in demod.xml <threat>. -->
+  <threat>
+    <enabled>false</enabled>
+
+    <!-- GPS L1/L2/L5 jamming and spoofing monitor -->
+    <gps_enabled>false</gps_enabled>
+    <!-- dB above EMA baseline to declare a jammer -->
+    <gps_jammer_threshold_db>20.0</gps_jammer_threshold_db>
+    <!-- Any GPS-band signal above this power (dBm) = spoofing suspect.
+         Real GPS signals are always ~20 dB below the noise floor (~-130 dBm). -->
+    <gps_spoof_detectable_dbm>-110.0</gps_spoof_detectable_dbm>
+    <!-- Seconds between L1/L2/L5 checks (reduces sweep interruption) -->
+    <gps_check_interval_s>30.0</gps_check_interval_s>
+
+    <!-- Content-layer validators (run in DemodApp — flags mirrored in demod.xml) -->
+    <!-- Enable/disable individual validators independently -->
+    <adsb_enabled>true</adsb_enabled>       <!-- ADS-B impossible physics + CRC rate -->
+    <ais_enabled>true</ais_enabled>         <!-- AIS impossible vessel speed / bad MMSI -->
+    <eas_enabled>true</eas_enabled>         <!-- EAS/SAME invalid originator or rare event -->
+    <dsc_enabled>true</dsc_enabled>         <!-- DSC fake distress MMSI detection -->
+    <p25_rogue_enabled>true</p25_rogue_enabled> <!-- P25 unexpected WACN change -->
+
+    <!-- AMQP topic that DemodApp publishes alerts to (AcquisitionApp consumes) -->
+    <alert_topic>rf.alerts</alert_topic>
+  </threat>
+
   <!-- P25 trunked voice channel follower (disabled by default).
        Enable to have AcquisitionApp retune to voice channels when DemodApp
        publishes channel grants on rf.p25.grants.

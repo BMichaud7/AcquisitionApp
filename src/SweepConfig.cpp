@@ -53,6 +53,32 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         while (ss >> id) cfg.scan_device_ids.push_back(id);
     }
 
+    // ── Threat detection ─────────────────────────────────────────────────────
+    if (auto* th = opt(root, "threat")) {
+        auto boolopt = [&](XMLElement* parent, const char* tag, bool def) -> bool {
+            if (auto* e = opt(parent, tag)) {
+                std::string v = e->GetText() ? e->GetText() : "";
+                return (v == "true" || v == "1" || v == "yes");
+            }
+            return def;
+        };
+        cfg.threat.enabled          = boolopt(th, "enabled", false);
+        cfg.threat.gps_enabled      = boolopt(th, "gps_enabled",   false);
+        cfg.threat.adsb_enabled     = boolopt(th, "adsb_enabled",   true);
+        cfg.threat.ais_enabled      = boolopt(th, "ais_enabled",    true);
+        cfg.threat.eas_enabled      = boolopt(th, "eas_enabled",    true);
+        cfg.threat.dsc_enabled      = boolopt(th, "dsc_enabled",    true);
+        cfg.threat.p25_rogue_enabled= boolopt(th, "p25_rogue_enabled", true);
+        if (auto* e = opt(th, "gps_jammer_threshold_db"))
+            e->QueryDoubleText(&cfg.threat.gps_jammer_threshold_db);
+        if (auto* e = opt(th, "gps_spoof_detectable_dbm"))
+            e->QueryDoubleText(&cfg.threat.gps_spoof_detectable_dbm);
+        if (auto* e = opt(th, "gps_check_interval_s"))
+            e->QueryDoubleText(&cfg.threat.gps_check_interval_s);
+        if (auto* e = opt(th, "alert_topic"))
+            cfg.threat.alert_topic = textOrDefault(e, cfg.threat.alert_topic.c_str());
+    }
+
     // ── P25 grant follower ───────────────────────────────────────────────────
     if (auto* p25 = opt(root, "p25")) {
         auto boolopt = [&](const char* tag, bool def) -> bool {

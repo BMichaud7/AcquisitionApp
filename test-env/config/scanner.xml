@@ -39,4 +39,11 @@
     <port>0</port>
   </receiver>
 
+
+  <!-- Threat detection disabled in test environment -->
+  <threat>
+    <enabled>false</enabled>
+    <gps_enabled>false</gps_enabled>
+  </threat>
+
 </sdr_acquisition>
