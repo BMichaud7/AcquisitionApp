@@ -3,11 +3,33 @@
 #include <proton/connection_options.hpp>
 #include <proton/delivery.hpp>
 #include <proton/message.hpp>
-#include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
+// NOTE: deliberately no <nlohmann/json.hpp> here — combining <pqxx/pqxx>
+// (pulled in via AlertStore.hpp) with <optional> (pulled in by nlohmann)
+// in the same TU triggers pqxx 7.x's std::optional type-converter static
+// initialiser, which references pqxx::internal::demangle_type_name — not
+// exported by the CI distro's libpqxx binary.  Parse the simple alert JSON
+// with plain string operations instead.
 
 namespace acq {
-using json = nlohmann::json;
+
+// ── Minimal JSON field extractor (no deps on nlohmann / optional) ─────────────
+static std::string jsonStr(const std::string& body, const char* key) {
+    std::string search = std::string("\"") + key + "\":\"";
+    auto pos = body.find(search);
+    if (pos == std::string::npos) return {};
+    pos += search.size();
+    auto end = body.find('"', pos);
+    return end == std::string::npos ? std::string{} : body.substr(pos, end - pos);
+}
+
+static double jsonDouble(const std::string& body, const char* key) {
+    std::string search = std::string("\"") + key + "\":";
+    auto pos = body.find(search);
+    if (pos == std::string::npos) return 0.0;
+    pos += search.size();
+    try { return std::stod(body.substr(pos)); } catch (...) { return 0.0; }
+}
 
 AlertConsumer::AlertConsumer(std::string url, std::string user, std::string pass,
                              AlertStore& store, std::string topic)
@@ -47,11 +69,15 @@ void AlertConsumer::on_message(proton::delivery& d, proton::message& msg) {
     d.accept();
     try {
         auto body = proton::get<std::string>(msg.body());
-        auto j = json::parse(body, nullptr, false);
-        if (j.is_discarded()) return;
+        if (body.empty()) return;
 
-        // Map JSON fields to RfAlert
-        static const std::unordered_map<std::string, AlertType> type_map = {
+        std::string type_str = jsonStr(body, "type");
+        std::string sev_str  = jsonStr(body, "severity");
+        std::string details  = jsonStr(body, "details");
+        double freq_hz       = jsonDouble(body, "freq_hz");
+
+        // Map type string to AlertType
+        static const std::pair<const char*, AlertType> type_map[] = {
             {"GPS_JAMMING",    AlertType::GPS_JAMMING},
             {"GPS_SPOOFING",   AlertType::GPS_SPOOFING},
             {"ADSB_SPOOFING",  AlertType::ADSB_SPOOFING},
@@ -61,20 +87,23 @@ void AlertConsumer::on_message(proton::delivery& d, proton::message& msg) {
             {"DSC_SPOOFING",   AlertType::DSC_SPOOFING},
             {"P25_ROGUE_SITE", AlertType::P25_ROGUE_SITE},
         };
-        static const std::unordered_map<std::string, AlertSeverity> sev_map = {
-            {"LOW", AlertSeverity::LOW}, {"MEDIUM", AlertSeverity::MEDIUM},
-            {"HIGH", AlertSeverity::HIGH}, {"CRITICAL", AlertSeverity::CRITICAL},
-        };
+        AlertType type = AlertType::GPS_JAMMING;
+        bool found = false;
+        for (const auto& [k, v] : type_map) {
+            if (type_str == k) { type = v; found = true; break; }
+        }
+        if (!found) return;
+
+        AlertSeverity sev = AlertSeverity::MEDIUM;
+        if      (sev_str == "LOW")      sev = AlertSeverity::LOW;
+        else if (sev_str == "HIGH")     sev = AlertSeverity::HIGH;
+        else if (sev_str == "CRITICAL") sev = AlertSeverity::CRITICAL;
 
         RfAlert alert;
-        auto t_it = type_map.find(j.value("type", ""));
-        if (t_it == type_map.end()) return;
-        alert.type     = t_it->second;
-        auto s_it = sev_map.find(j.value("severity", "MEDIUM"));
-        alert.severity = (s_it != sev_map.end()) ? s_it->second : AlertSeverity::MEDIUM;
-        alert.freq_hz  = j.value("freq_hz", 0.0);
-        alert.power_db = j.value("power_db", 0.0f);
-        alert.details  = j.value("details", "");
+        alert.type     = type;
+        alert.severity = sev;
+        alert.freq_hz  = freq_hz;
+        alert.details  = details;
         store_.insert(alert);
     } catch (const std::exception& e) {
         spdlog::warn("[AlertConsumer] parse error: {}", e.what());
