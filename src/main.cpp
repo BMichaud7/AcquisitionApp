@@ -149,7 +149,7 @@ int main(int argc, char* argv[]) {
 
         // Build a one-shot IQ source for voice channel captures
         // (separate from the sweep scanner sources so grants don't interrupt sweeps)
-        auto p25_src = std::make_unique<acq::TaskManagerIqSource>(cfg, "", cfg.p25.rank);
+        auto p25_src = std::make_unique<acq::TaskManagerIqSource>(cfg, "");
 
         p25 = std::make_unique<acq::P25GrantConsumer>(
             cfg.amqp.url, cfg.amqp.username, cfg.amqp.password,
