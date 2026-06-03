@@ -16,8 +16,8 @@ void AlertStore::insert(const RfAlert& alert) {
             alertTypeName(alert.type),
             severityName(alert.severity),
             alert.freq_hz > 0.0 ? std::make_optional(alert.freq_hz / 1e6) : std::nullopt,
-            alert.power_db != 0.0f ? std::make_optional(alert.power_db) : std::nullopt,
-            alert.baseline_db != 0.0f ? std::make_optional(alert.baseline_db) : std::nullopt,
+            alert.power_db != 0.0f ? std::make_optional(static_cast<double>(alert.power_db)) : std::nullopt,
+            alert.baseline_db != 0.0f ? std::make_optional(static_cast<double>(alert.baseline_db)) : std::nullopt,
             alert.scanner_id.empty() ? std::nullopt : std::make_optional(alert.scanner_id),
             alert.details);
         tx.commit();
