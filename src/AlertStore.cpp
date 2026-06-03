@@ -1,22 +1,29 @@
+// <pqxx/pqxx> is intentionally included ONLY here, not in AlertStore.hpp.
+// This prevents pqxx 7.x's std::optional type-converter static initialisers
+// from firing in TUs that include AlertStore.hpp alongside headers that pull
+// in <optional> (proton message.hpp, spdlog, etc.).
 #include "AlertStore.hpp"
+#include <pqxx/pqxx>
 #include <spdlog/spdlog.h>
-#include <chrono>
 
 namespace acq {
 
-AlertStore::AlertStore(const std::string& conn_str) : conn_(conn_str) {}
+AlertStore::AlertStore(const std::string& conn_str)
+    : conn_(std::make_unique<pqxx::connection>(conn_str)) {}
+
+// Destructor must be in .cpp so pqxx::connection is a complete type when deleted.
+AlertStore::~AlertStore() = default;
 
 void AlertStore::insert(const RfAlert& alert) {
     try {
-        pqxx::work tx(conn_);
+        pqxx::work tx(*conn_);
         // Build nullable fields as SQL literals to avoid std::optional<T>
-        // which triggers pqxx 7.x type-registration static initializers that
-        // reference pqxx::internal::demangle_type_name (not exported on all distros).
-        std::string freq_sql    = alert.freq_hz > 0.0
+        // which also triggers the demangle_type_name static initialisers.
+        std::string freq_sql  = alert.freq_hz > 0.0
             ? std::to_string(alert.freq_hz / 1e6) : "NULL";
-        std::string power_sql   = alert.power_db != 0.0f
+        std::string power_sql = alert.power_db != 0.0f
             ? std::to_string(static_cast<double>(alert.power_db)) : "NULL";
-        std::string base_sql    = alert.baseline_db != 0.0f
+        std::string base_sql  = alert.baseline_db != 0.0f
             ? std::to_string(static_cast<double>(alert.baseline_db)) : "NULL";
         std::string scanner_sql = alert.scanner_id.empty()
             ? "NULL" : tx.quote(alert.scanner_id);

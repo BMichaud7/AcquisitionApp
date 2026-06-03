@@ -3,32 +3,20 @@
  * @file AlertStore.hpp
  * @brief PostgreSQL persistence for RF threat alerts.
  *
- * AlertStore owns a single persistent @c pqxx::connection and serialises
- * RfAlert records into the @c rf_alerts table.  It is not thread-safe; the
- * caller (main loop or AlertConsumer callback) must ensure single-threaded
- * access, or wrap with a mutex.
- *
- * @par Schema
- * The @c rf_alerts table is created by @c schema/init.sql:
- * @code{.sql}
- * CREATE TABLE rf_alerts (
- *   id          BIGSERIAL PRIMARY KEY,
- *   detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- *   alert_type  TEXT NOT NULL,
- *   severity    TEXT NOT NULL,
- *   freq_mhz    DOUBLE PRECISION,
- *   power_db    REAL,
- *   baseline_db REAL,
- *   scanner_id  TEXT,
- *   details     TEXT NOT NULL
- * );
- * @endcode
+ * Uses the pimpl idiom: <pqxx/pqxx> is included only in AlertStore.cpp,
+ * never in this header.  This prevents pqxx 7.x's std::optional type-converter
+ * static initialisers from firing in translation units that include AlertStore.hpp
+ * alongside headers that pull in <optional> (proton, spdlog, etc.).
  *
  * @see RfAlert, AlertConsumer
  */
 #include "RfAlert.hpp"
-#include <pqxx/pqxx>
+#include <memory>
 #include <string>
+
+// Forward-declare pqxx::connection so we can hold a unique_ptr without
+// including <pqxx/pqxx> in this header.
+namespace pqxx { class connection; }
 
 namespace acq {
 
@@ -36,10 +24,10 @@ namespace acq {
  * @class AlertStore
  * @brief Writes RfAlert records to the @c rf_alerts PostgreSQL table.
  *
- * Constructed with a libpqxx connection string (same format as DetectionDb).
- * Each call to insert() opens a transaction, inserts one row, and commits.
- * If the database is unavailable the error is logged and the alert is dropped
- * silently — the system continues operating without threat persistence.
+ * Constructed with a libpqxx connection string.  Each call to insert()
+ * opens a transaction, inserts one row, and commits.  On failure the
+ * exception is caught, logged via spdlog, and swallowed so the calling
+ * thread is never interrupted by a transient database error.
  */
 class AlertStore {
 public:
@@ -51,17 +39,21 @@ public:
      */
     explicit AlertStore(const std::string& conn_str);
 
+    /// @brief Destructor — closes the pqxx::connection (defined in .cpp).
+    ~AlertStore();
+
     /**
      * @brief Insert one alert into @c rf_alerts.
      *
      * A new transaction is opened and committed for each call.
-     * On failure the exception is caught, logged via spdlog, and swallowed.
-     * @param alert The alert to persist.
+     * On failure the exception is caught, logged, and swallowed.
+     * @param alert The alert record to persist.
      */
     void insert(const RfAlert& alert);
 
 private:
-    pqxx::connection conn_; ///< Persistent database connection.
+    /// Pimpl: pqxx::connection is only a complete type in AlertStore.cpp.
+    std::unique_ptr<pqxx::connection> conn_;
 };
 
 } // namespace acq
