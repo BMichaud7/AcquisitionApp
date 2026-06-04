@@ -25,3 +25,11 @@ extern std::atomic<float> tone_amplitude;  // Tone amplitude (0 = silence)
 void reset();  // Restore all fields to defaults
 
 } // namespace FakeAcqSoapy
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

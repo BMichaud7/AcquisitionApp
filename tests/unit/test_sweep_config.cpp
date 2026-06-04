@@ -307,3 +307,11 @@ TEST_F(SweepConfigTest, ExplicitRankIsLoaded) {
         </sdr_acquisition>)");
     EXPECT_EQ(cfg.rank, 3);
 }
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

@@ -142,3 +142,11 @@ void P25GrantConsumer::worker_loop() {
 }
 
 } // namespace acq
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

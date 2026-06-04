@@ -165,3 +165,11 @@ TEST(P25ScannerTag, VoiceTagFormat) {
     std::string tagged = base_id + "-tg" + std::to_string(tg);
     EXPECT_EQ(tagged, "scanner-0-tg50123");
 }
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

@@ -230,3 +230,11 @@ TEST(RfAlert, PopulateAllFields) {
     EXPECT_EQ(a.scanner_id, "scanner-0");
     EXPECT_GT(a.power_db - a.baseline_db, 20.0f);  // delta > threshold
 }
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

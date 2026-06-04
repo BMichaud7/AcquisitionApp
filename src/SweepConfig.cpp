@@ -200,3 +200,11 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
 
 
 } // namespace acq
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

@@ -103,3 +103,11 @@ private:
     int      stream_tok_  = 0;
     uint64_t phase_       = 0;
 };
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

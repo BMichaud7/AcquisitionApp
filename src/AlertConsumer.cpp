@@ -128,3 +128,11 @@ void AlertConsumer::on_error(const proton::error_condition& e) {
 }
 
 } // namespace acq
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

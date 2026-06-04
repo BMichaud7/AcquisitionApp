@@ -437,3 +437,11 @@ TEST(FftProcessor, DetectIsIdempotent) {
         EXPECT_EQ(s1[i].end_bin,   s2[i].end_bin);
     }
 }
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

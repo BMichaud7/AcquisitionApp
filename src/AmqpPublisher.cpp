@@ -118,3 +118,11 @@ proton::message AmqpPublisher::makeMessage(const Detection& d) const {
 }
 
 } // namespace acq
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

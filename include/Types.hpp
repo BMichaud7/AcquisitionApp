@@ -60,3 +60,11 @@ struct Detection {
 };
 
 } // namespace acq
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

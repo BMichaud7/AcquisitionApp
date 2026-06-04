@@ -317,3 +317,11 @@ TEST_F(SpectrumScannerTest, DetectionCenterFreqIsInSweepRange) {
         EXPECT_LE(fc, 108'000'000.0);
     }
 }
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

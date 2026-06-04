@@ -132,3 +132,11 @@ float GpsMonitor::computeBandwidthMHz(const std::vector<float>& iq, double sr_hz
 }
 
 } // namespace acq
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

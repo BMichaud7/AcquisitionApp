@@ -102,3 +102,11 @@ void P25Db::upsert_grant(const P25Grant& g,
 }
 
 } // namespace acq
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/

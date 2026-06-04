@@ -48,3 +48,11 @@ static SoapySDR::Device* makeFakeAcq(const SoapySDR::Kwargs& args) {
 // Static constructor registers "fake_acq" driver before any test runs.
 static SoapySDR::Registry gFakeAcqRegistry("fake_acq", &findFakeAcq, &makeFakeAcq,
                                             SOAPY_SDR_ABI_VERSION);
+
+/*
+========================================================================
+End of file — OpenRFStack
+Subject to Personal Use License
+https://github.com/OpenRFStack
+========================================================================
+*/
