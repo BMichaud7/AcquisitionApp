@@ -1,3 +1,15 @@
+/*
+========================================================================
+Project: OpenRFStack
+Author:  Brendan Michaud
+Year:    2026
+Part of OpenRFStack (https://github.com/OpenRFStack)
+
+Licensed under the Personal Use License.
+Do not use for commercial, organizational, or military purposes.
+Contact author for permission: https://github.com/OpenRFStack
+========================================================================
+*/
 // <pqxx/pqxx> is intentionally included ONLY here, not in AlertStore.hpp.
 // This prevents pqxx 7.x's std::optional type-converter static initialisers
 // from firing in TUs that include AlertStore.hpp alongside headers that pull

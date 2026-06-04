@@ -1,3 +1,15 @@
+/*
+========================================================================
+Project: OpenRFStack
+Author:  Brendan Michaud
+Year:    2026
+Part of OpenRFStack (https://github.com/OpenRFStack)
+
+Licensed under the Personal Use License.
+Do not use for commercial, organizational, or military purposes.
+Contact author for permission: https://github.com/OpenRFStack
+========================================================================
+*/
 // FftProcessor micro-benchmark
 // Measures wall-clock time for the hot path: computeSpectrum + detectFromSpectrum.
 // Uses realistic inputs (20 MSPS, 131 072-sample dwell, 4096-pt FFT = 63 Welch frames).
