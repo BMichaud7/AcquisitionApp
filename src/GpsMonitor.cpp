@@ -13,6 +13,7 @@ Contact author for permission: https://github.com/OpenRFStack
 #include "GpsMonitor.hpp"
 #include <spdlog/spdlog.h>
 #include <cmath>
+#include <iomanip>
 #include <chrono>
 #include <numeric>
 #include <sstream>
