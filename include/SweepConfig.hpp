@@ -134,6 +134,30 @@ struct P25Config {
     std::vector<uint32_t> tg_whitelist;        ///< empty = all talk groups
 };
 
+/**
+ * @brief One frequency band for multi-band parallel scanning.
+ *
+ * Each BandConfig spawns its own IqSource + SpectrumScanner, requesting
+ * whichever SDR device is next available from SdrResourceManager (or a
+ * specific device if device_id is set). All sweep parameters (FFT size,
+ * CFAR, threshold, etc.) are inherited from the top-level SweepParams and
+ * only start_hz / stop_hz are overridden per band.
+ *
+ * XML syntax inside <bands>:
+ * @code{.xml}
+ *   <band>
+ *     <start_hz>88000000</start_hz>
+ *     <stop_hz>174000000</stop_hz>
+ *     <!-- <device>pluto-0</device>  optional: pin to a specific device -->
+ *   </band>
+ * @endcode
+ */
+struct BandConfig {
+    std::string device_id;                              ///< Empty = SdrRM assigns next available.
+    au::QuantityD<au::Hertz> start_hz{au::hertz(0.0)}; ///< Band start frequency.
+    au::QuantityD<au::Hertz> stop_hz{au::hertz(0.0)};  ///< Band stop frequency.
+};
+
 struct SweepConfig {
     std::string    scanner_id{"scanner-0"}; ///< Identifies this scanner in AMQP messages.
     int            rank{1};  ///< Preemption tier: 1=Acq (lowest), 2=Ana, 3=DF (highest).
@@ -141,9 +165,22 @@ struct SweepConfig {
     /// Gives AnalysisApp (lower rank) a guaranteed window to grab the SDR.
     /// 0 = disabled (continuous sweep, no analysis window).
     au::QuantityD<au::Seconds> analysis_pause_ms{au::seconds(0.0)};
-    /// Device IDs to scan simultaneously. Empty = scheduler picks any free device.
-    /// Set in XML: <scan_device_ids>pluto-0 pluto-1</scan_device_ids>
-    /// AcquisitionApp submits one SCAN task per device and scans them in parallel.
+
+    /**
+     * @brief Multi-band parallel scan configuration.
+     *
+     * When non-empty, one SpectrumScanner is spawned per band and scan_device_ids
+     * is ignored. Each scanner independently requests "next available device" from
+     * SdrResourceManager, so N bands naturally spread across N available SDRs with
+     * no duplicate frequency coverage and no inter-process coordination required.
+     *
+     * When empty, falls back to the legacy scan_device_ids / single-sweep behaviour.
+     */
+    std::vector<BandConfig>  bands;
+
+    /// Legacy: device IDs to scan simultaneously with the same sweep range.
+    /// Ignored when bands is non-empty.
+    /// Empty = scheduler picks any free device.
     std::vector<std::string> scan_device_ids;
     AmqpConfig     amqp;
     DbConfig       db;

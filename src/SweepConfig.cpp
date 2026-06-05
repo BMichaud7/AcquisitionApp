@@ -65,6 +65,25 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         while (ss >> id) cfg.scan_device_ids.push_back(id);
     }
 
+    // ── Multi-band parallel scan (parsed before <sweep> so defaults apply) ───
+    // Each <band> inherits sweep params and only overrides start_hz / stop_hz.
+    // Parsed here just to collect device/freq pairs; SweepParams are applied in
+    // main.cpp after the top-level <sweep> block is parsed.
+    struct RawBand { std::string device; uint64_t start_hz{0}, stop_hz{0}; };
+    std::vector<RawBand> raw_bands;
+    if (auto* bands_el = opt(root, "bands")) {
+        for (auto* b = bands_el->FirstChildElement("band"); b; b = b->NextSiblingElement("band")) {
+            RawBand rb;
+            rb.device = textOrDefault(opt(b, "device"));
+            if (auto* e = opt(b, "start_hz")) e->QueryUnsigned64Text(&rb.start_hz);
+            if (auto* e = opt(b, "stop_hz"))  e->QueryUnsigned64Text(&rb.stop_hz);
+            if (rb.stop_hz <= rb.start_hz)
+                throw std::runtime_error(fmt::format(
+                    "<band> stop_hz ({}) must be > start_hz ({})", rb.stop_hz, rb.start_hz));
+            raw_bands.push_back(std::move(rb));
+        }
+    }
+
     // ── Threat detection ─────────────────────────────────────────────────────
     if (auto* th = opt(root, "threat")) {
         auto boolopt = [&](XMLElement* parent, const char* tag, bool def) -> bool {
@@ -188,6 +207,15 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         throw std::runtime_error("fft_size must be >= 64");
     if (cfg.sweep.dwell_samples < cfg.sweep.fft_size)
         cfg.sweep.dwell_samples = cfg.sweep.fft_size;
+
+    // ── Materialise BandConfigs (after sweep defaults are set) ───────────────
+    for (const auto& rb : raw_bands) {
+        BandConfig bc;
+        bc.device_id = rb.device;
+        bc.start_hz  = au::hertz(static_cast<double>(rb.start_hz));
+        bc.stop_hz   = au::hertz(static_cast<double>(rb.stop_hz));
+        cfg.bands.push_back(std::move(bc));
+    }
 
     // ── Receiver ─────────────────────────────────────────────────────────────
     if (auto* rx = opt(root, "receiver")) {

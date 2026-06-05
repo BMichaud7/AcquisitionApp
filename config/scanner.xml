@@ -48,10 +48,13 @@
     <bandwidth_hz>10000000</bandwidth_hz>
   </device>
 
-  <!-- ── Sweep parameters ───────────────────────────────────────────────── -->
+  <!-- ── Sweep parameters (shared defaults) ──────────────────────────────── -->
+  <!-- These apply to all bands. start_hz / stop_hz are used when <bands> is
+       absent (single-SDR mode); they are overridden per band when <bands> is
+       present. -->
   <sweep>
-    <start_hz>70000000</start_hz>       <!-- 70 MHz -->
-    <stop_hz>1000000000</stop_hz>       <!-- 1 GHz  -->
+    <start_hz>70000000</start_hz>       <!-- 70 MHz  (single-SDR default) -->
+    <stop_hz>1000000000</stop_hz>       <!-- 1 GHz   (single-SDR default) -->
     <dwell_samples>4096</dwell_samples>
     <fft_size>4096</fft_size>
     <usable_bw_fraction>0.80</usable_bw_fraction>
@@ -59,6 +62,43 @@
     <min_signal_bw_hz>2500</min_signal_bw_hz>
     <settle_samples>512</settle_samples>
   </sweep>
+
+  <!-- ── Multi-band parallel scanning (optional) ───────────────────────── -->
+  <!-- Uncomment and populate to run one scanner per band, each automatically
+       claiming a different SDR device from SdrResourceManager. This eliminates
+       duplicate frequency coverage without needing multiple AcquisitionApp
+       processes or any inter-process coordination.
+
+       Rules:
+         - Each <band> requires only <start_hz> and <stop_hz>.
+         - All sweep params (FFT size, threshold, CFAR, etc.) are inherited
+           from the <sweep> block above unless overridden here.
+         - <device> is optional: leave empty to let SdrRM assign the next
+           available device, or pin to a specific device ID.
+         - The number of bands should not exceed the number of available SDRs.
+
+  <bands>
+    <band>
+      <start_hz>70000000</start_hz>     --><!-- 70–174 MHz: VHF (FM, AIS, P25, NOAA) --><!--
+      <stop_hz>174000000</stop_hz>
+      <device></device>                 --><!-- SdrRM picks next available             --><!--
+    </band>
+    <band>
+      <start_hz>400000000</start_hz>    --><!-- 400–512 MHz: UHF P25                  --><!--
+      <stop_hz>512000000</stop_hz>
+    </band>
+    <band>
+      <start_hz>850000000</start_hz>    --><!-- 850–960 MHz: 800 MHz P25 / cellular    --><!--
+      <stop_hz>960000000</stop_hz>
+    </band>
+    <band>
+      <start_hz>1080000000</start_hz>   --><!-- 1080–1100 MHz: ADS-B 1090             --><!--
+      <stop_hz>1100000000</stop_hz>
+      <device>pluto-0</device>          --><!-- optional: pin ADS-B to a specific SDR  --><!--
+    </band>
+  </bands>
+  -->
+
 
   <!-- ── UDP IQ receiver ────────────────────────────────────────────────── -->
   <!-- local_ip: IP the acquisition binds to receive IQ data from the
