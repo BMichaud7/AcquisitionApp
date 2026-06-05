@@ -133,33 +133,79 @@ int main(int argc, char* argv[]) {
     std::vector<std::unique_ptr<acq::TaskManagerIqSource>> sources;
     std::vector<std::unique_ptr<acq::SpectrumScanner>>     scanners;
 
-    if (!cfg.bands.empty()) {
-        spdlog::info("Band mode: {} bands, SdrRM assigns devices", cfg.bands.size());
-        for (const auto& band : cfg.bands) {
-            // Each band inherits all sweep params; only start/stop are overridden.
+    // ── Build effective band list ──────────────────────────────────────────────
+    // Priority: explicit bands > scan_device_ids (legacy) > single sweep.
+    // For band and single-sweep modes, query SdrRM for online device count and
+    // auto-split so every available device covers a unique frequency slice.
+    if (!cfg.scan_device_ids.empty()) {
+        // Legacy mode: named devices, all scan the same configured sweep range.
+        spdlog::info("Multi-device mode: {} named device(s)", cfg.scan_device_ids.size());
+        for (const auto& dev_id : cfg.scan_device_ids) {
+            spdlog::info("  → {}", dev_id);
+            sources.push_back(std::make_unique<acq::TaskManagerIqSource>(cfg, dev_id));
+            scanners.push_back(std::make_unique<acq::SpectrumScanner>(cfg, sources.back().get(), on_detection));
+        }
+    } else {
+        // Band mode (or single sweep treated as one band).
+        // Step 1: normalise to a band list.
+        std::vector<acq::BandConfig> effective_bands = cfg.bands;
+        if (effective_bands.empty()) {
+            acq::BandConfig b;
+            b.start_hz = cfg.sweep.start_hz;
+            b.stop_hz  = cfg.sweep.stop_hz;
+            effective_bands.push_back(b);
+        }
+
+        // Step 2: query SdrRM for online device count, then split bands to match.
+        // One temporary IqSource is created just for the HEALTH_QUERY — it uses
+        // the persistent AMQP channel so the cost is a single ~16 ms round trip.
+        {
+            auto probe      = std::make_unique<acq::TaskManagerIqSource>(cfg);
+            const int n_dev = probe->queryDeviceCount();
+            probe.reset();
+
+            if (n_dev > static_cast<int>(effective_bands.size())) {
+                // More devices than bands — subdivide each band into equal slices.
+                // Distribute remainder to the first bands so all devices are used.
+                //   1 band  + 4 devices → [slice0, slice1, slice2, slice3]
+                //   2 bands + 4 devices → each band → [slice0, slice1]
+                //   3 bands + 4 devices → band0 → [s0, s1],  band1 → [s0],  band2 → [s0]
+                std::vector<acq::BandConfig> split;
+                const int nb        = static_cast<int>(effective_bands.size());
+                const int base      = n_dev / nb;
+                const int remainder = n_dev % nb;
+                for (int i = 0; i < nb; ++i) {
+                    const int    pieces = base + (i < remainder ? 1 : 0);
+                    const double lo     = effective_bands[i].start_hz.in(au::hertz);
+                    const double hi     = effective_bands[i].stop_hz.in(au::hertz);
+                    const double step   = (hi - lo) / pieces;
+                    for (int j = 0; j < pieces; ++j) {
+                        acq::BandConfig bc;
+                        bc.device_id = effective_bands[i].device_id;
+                        bc.start_hz  = au::hertz(lo + j       * step);
+                        bc.stop_hz   = au::hertz(lo + (j + 1) * step);
+                        split.push_back(bc);
+                    }
+                }
+                spdlog::info("Auto-split: {} band(s) × {} device(s) → {} slice(s)",
+                    nb, n_dev, split.size());
+                effective_bands = std::move(split);
+            }
+        }
+
+        // Step 3: spawn one (IqSource, SpectrumScanner) per effective band.
+        spdlog::info("Launching {} scanner(s):", effective_bands.size());
+        for (const auto& band : effective_bands) {
             acq::SweepConfig bcfg = cfg;
             bcfg.sweep.start_hz = band.start_hz;
             bcfg.sweep.stop_hz  = band.stop_hz;
-            bcfg.bands.clear(); // avoid recursive logging
-            spdlog::info("  band {:.3f}–{:.3f} MHz  device={}",
+            bcfg.bands.clear();
+            spdlog::info("  {:.3f}–{:.3f} MHz  device={}",
                 band.start_hz.in(au::hertz) / 1e6,
                 band.stop_hz.in(au::hertz)  / 1e6,
                 band.device_id.empty() ? "any" : band.device_id);
             sources.push_back(std::make_unique<acq::TaskManagerIqSource>(bcfg, band.device_id));
             scanners.push_back(std::make_unique<acq::SpectrumScanner>(bcfg, sources.back().get(), on_detection));
-        }
-    } else if (cfg.scan_device_ids.empty()) {
-        spdlog::info("Single-band mode: device=any, {:.3f}–{:.3f} MHz",
-            cfg.sweep.start_hz.in(au::hertz) / 1e6,
-            cfg.sweep.stop_hz.in(au::hertz)  / 1e6);
-        sources.push_back(std::make_unique<acq::TaskManagerIqSource>(cfg));
-        scanners.push_back(std::make_unique<acq::SpectrumScanner>(cfg, sources.back().get(), on_detection));
-    } else {
-        spdlog::info("Multi-device mode: {} devices, same sweep range", cfg.scan_device_ids.size());
-        for (const auto& dev_id : cfg.scan_device_ids) {
-            spdlog::info("  → {}", dev_id);
-            sources.push_back(std::make_unique<acq::TaskManagerIqSource>(cfg, dev_id));
-            scanners.push_back(std::make_unique<acq::SpectrumScanner>(cfg, sources.back().get(), on_detection));
         }
     }
 

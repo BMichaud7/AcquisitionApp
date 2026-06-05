@@ -411,6 +411,32 @@ void TaskManagerIqSource::sendTaskStop() {
     task_id_.clear();
 }
 
+int TaskManagerIqSource::queryDeviceCount() {
+    auto req_id = makeReqId();
+    auto now_ms = duration_cast<milliseconds>(
+        system_clock::now().time_since_epoch()).count();
+    json req = {
+        {"msg_type",       "HEALTH_QUERY"},
+        {"schema_version", "2.0"},
+        {"timestamp_ms",   now_ms},
+        {"request_id",     req_id}
+    };
+    auto resp = amqp_ch_->exchange(req.dump(), req_id, 10000);
+    if (!resp.received) {
+        spdlog::warn("[TaskMgrSrc] HEALTH_QUERY timed out — assuming 1 device");
+        return 1;
+    }
+    try {
+        auto j = json::parse(resp.body);
+        int n = j["controller"].value("num_devices_online", 1);
+        spdlog::info("[TaskMgrSrc] SdrRM reports {} online device(s)", n);
+        return std::max(1, n);
+    } catch (...) {
+        spdlog::warn("[TaskMgrSrc] HEALTH_QUERY parse failed — assuming 1 device");
+        return 1;
+    }
+}
+
 void TaskManagerIqSource::open() {
     // Pre-bind before submitting the task so the controller streams to a
     // ready socket from the first packet — eliminates the race where

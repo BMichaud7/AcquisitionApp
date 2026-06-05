@@ -70,6 +70,17 @@ public:
     ~TaskManagerIqSource() override;
 
     /**
+     * @brief Query SdrRM for the number of online SDR devices.
+     *
+     * Sends a HEALTH_QUERY via the persistent AMQP channel and parses
+     * controller.num_devices_online from the response. Used by main() to
+     * auto-split bands when more devices are available than bands configured.
+     *
+     * @return Number of online devices, or 1 on timeout / parse failure.
+     */
+    int queryDeviceCount();
+
+    /**
      * @brief Submit a SCAN task and bind the UDP socket.
      * @throws std::runtime_error if the task is rejected or the socket bind fails.
      */
