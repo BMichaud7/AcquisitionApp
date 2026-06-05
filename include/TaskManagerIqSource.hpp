@@ -100,6 +100,10 @@ private:
 
     std::vector<std::vector<std::complex<float>>> ch_accum_; ///< Per-channel sample accumulators.
     au::QuantityD<au::Hertz> current_center_hz_{au::hertz(0.0)};
+    /// Start frequency for the next task submission. Advances past the last
+    /// completed dwell so re-submissions continue the sweep rather than
+    /// restarting from start_hz after each preemption.
+    au::QuantityD<au::Hertz> resume_hz_{au::hertz(0.0)};
     std::vector<uint8_t> pkt_buf_;  ///< Pre-allocated UDP receive buffer.
 
     void         bindUdp(uint16_t port);

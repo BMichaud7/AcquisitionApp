@@ -65,22 +65,22 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         while (ss >> id) cfg.scan_device_ids.push_back(id);
     }
 
-    // ── Multi-band parallel scan (parsed before <sweep> so defaults apply) ───
-    // Each <band> inherits sweep params and only overrides start_hz / stop_hz.
-    // Parsed here just to collect device/freq pairs; SweepParams are applied in
-    // main.cpp after the top-level <sweep> block is parsed.
-    struct RawBand { std::string device; uint64_t start_hz{0}, stop_hz{0}; };
-    std::vector<RawBand> raw_bands;
+    // ── Multi-band parallel scan (collected here, applied after <sweep>) ───────
+    // Bands are stored temporarily and pushed into cfg.bands after the sweep block
+    // so each BandConfig inherits the fully-parsed SweepParams defaults.
+    std::vector<BandConfig> pending_bands;
     if (auto* bands_el = opt(root, "bands")) {
         for (auto* b = bands_el->FirstChildElement("band"); b; b = b->NextSiblingElement("band")) {
-            RawBand rb;
-            rb.device = textOrDefault(opt(b, "device"));
-            if (auto* e = opt(b, "start_hz")) e->QueryUnsigned64Text(&rb.start_hz);
-            if (auto* e = opt(b, "stop_hz"))  e->QueryUnsigned64Text(&rb.stop_hz);
-            if (rb.stop_hz <= rb.start_hz)
+            BandConfig bc;
+            bc.device_id = textOrDefault(opt(b, "device"));
+            uint64_t raw = 0;
+            if (auto* e = opt(b, "start_hz")) { e->QueryUnsigned64Text(&raw); bc.start_hz = au::hertz(static_cast<double>(raw)); raw = 0; }
+            if (auto* e = opt(b, "stop_hz"))  { e->QueryUnsigned64Text(&raw); bc.stop_hz  = au::hertz(static_cast<double>(raw)); }
+            if (bc.stop_hz <= bc.start_hz)
                 throw std::runtime_error(fmt::format(
-                    "<band> stop_hz ({}) must be > start_hz ({})", rb.stop_hz, rb.start_hz));
-            raw_bands.push_back(std::move(rb));
+                    "<band> stop_hz must be > start_hz (got {:.3f} MHz – {:.3f} MHz)",
+                    bc.start_hz.in(au::hertz) / 1e6, bc.stop_hz.in(au::hertz) / 1e6));
+            pending_bands.push_back(std::move(bc));
         }
     }
 
@@ -208,14 +208,8 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
     if (cfg.sweep.dwell_samples < cfg.sweep.fft_size)
         cfg.sweep.dwell_samples = cfg.sweep.fft_size;
 
-    // ── Materialise BandConfigs (after sweep defaults are set) ───────────────
-    for (const auto& rb : raw_bands) {
-        BandConfig bc;
-        bc.device_id = rb.device;
-        bc.start_hz  = au::hertz(static_cast<double>(rb.start_hz));
-        bc.stop_hz   = au::hertz(static_cast<double>(rb.stop_hz));
-        cfg.bands.push_back(std::move(bc));
-    }
+    // ── Apply pending bands now that sweep defaults are set ──────────────────
+    cfg.bands = std::move(pending_bands);
 
     // ── Receiver ─────────────────────────────────────────────────────────────
     if (auto* rx = opt(root, "receiver")) {

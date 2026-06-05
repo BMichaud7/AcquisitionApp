@@ -238,7 +238,8 @@ static std::string makeReqId() {
 
 TaskManagerIqSource::TaskManagerIqSource(const SweepConfig& cfg,
                                           std::string preferred_device)
-    : cfg_(cfg), preferred_device_(std::move(preferred_device)) {
+    : cfg_(cfg), preferred_device_(std::move(preferred_device)),
+      resume_hz_(cfg.sweep.start_hz) {
     pkt_buf_.resize(65536);
     resetAccum();
 
@@ -293,28 +294,33 @@ void TaskManagerIqSource::bindUdp(uint16_t port) {
 }
 
 std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) const {
-    const double sr_hz       = cfg_.device.sample_rate.in(au::hertz);
-    const double bw_hz       = cfg_.device.bandwidth_hz.in(au::hertz);
-    const double start_hz    = cfg_.sweep.start_hz.in(au::hertz);
-    const double stop_hz     = cfg_.sweep.stop_hz.in(au::hertz);
+    const double sr_hz    = cfg_.device.sample_rate.in(au::hertz);
+    const double bw_hz    = cfg_.device.bandwidth_hz.in(au::hertz);
+    const double start_hz = cfg_.sweep.start_hz.in(au::hertz);
+    const double stop_hz  = cfg_.sweep.stop_hz.in(au::hertz);
+    const double resume   = resume_hz_.in(au::hertz);
 
-    double step_hz = sr_hz * cfg_.sweep.usable_bw_fraction;
-    int    dwell_ms = static_cast<int>(
-        cfg_.sweep.dwell_samples * 1000.0 / sr_hz);
-    dwell_ms = std::max(dwell_ms, 1);
+    const double step_hz = sr_hz * cfg_.sweep.usable_bw_fraction;
+    int dwell_ms = std::max(1, static_cast<int>(cfg_.sweep.dwell_samples * 1000.0 / sr_hz));
 
-    json entries = json::array();
-    int step_i = 0;
-    for (double pos = start_hz; pos < stop_hz; pos += step_hz) {
-        double center = pos + step_hz / 2.0;
-        entries.push_back({
+    // Build entries starting from resume_hz so a re-submission after preemption
+    // continues the sweep rather than restarting at start_hz. The second loop
+    // wraps back through start_hz → resume_hz, ensuring every frequency is
+    // covered exactly once per task regardless of where we were interrupted.
+    auto makeEntry = [&](int& step_i, double pos) {
+        return json{
             {"step",            step_i++},
-            {"center_freq_hz",  center},
+            {"center_freq_hz",  pos + step_hz / 2.0},
             {"bandwidth_hz",    bw_hz},
             {"sample_rate_sps", sr_hz},
             {"dwell_ms",        dwell_ms}
-        });
-    }
+        };
+    };
+
+    json entries = json::array();
+    int step_i = 0;
+    for (double pos = resume; pos < stop_hz;  pos += step_hz) entries.push_back(makeEntry(step_i, pos));
+    for (double pos = start_hz; pos < resume; pos += step_hz) entries.push_back(makeEntry(step_i, pos));
 
     std::vector<double> gains(cfg_.device.rx_channels, cfg_.device.rx_gain_db);
 
@@ -480,6 +486,20 @@ bool TaskManagerIqSource::next(Dwell& d) {
         }
         first_packet = false;
         no_data_ms   = 0;
+        // Advance resume_hz_ on every packet so it always reflects the last
+        // frequency we actually received data at. When next() returns false
+        // (preemption or sweep complete) the next open() will resume from here.
+        if (static_cast<size_t>(n) >= sizeof(IqPacketHeader)) {
+            const auto& peek = *reinterpret_cast<const IqPacketHeader*>(pkt_buf_.data());
+            if (peek.magic == IQ_MAGIC) {
+                const double step_hz = cfg_.device.sample_rate.in(au::hertz)
+                                       * cfg_.sweep.usable_bw_fraction;
+                auto next_hz = au::hertz(static_cast<double>(peek.center_freq_hz) + step_hz);
+                resume_hz_ = (next_hz >= cfg_.sweep.stop_hz)
+                             ? cfg_.sweep.start_hz : next_hz;
+            }
+        }
+
         if (static_cast<size_t>(n) < sizeof(IqPacketHeader)) continue;
 
         const auto& hdr = *reinterpret_cast<const IqPacketHeader*>(pkt_buf_.data());
