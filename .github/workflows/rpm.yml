@@ -5,6 +5,9 @@ on:
     branches: ["main/1.0"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   rpm:
     runs-on: ubuntu-latest
@@ -17,7 +20,7 @@ jobs:
           dnf install -y epel-release dnf-plugins-core
           dnf config-manager --set-enabled crb
           dnf makecache
-          dnf install -y cmake ninja-build gcc-c++ git pkg-config rpm-build ruby ruby-devel
+          dnf install -y cmake ninja-build gcc-c++ git pkg-config ruby ruby-devel
           gem install --no-document fpm
           dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
           dnf install -y gh --repo gh-cli
@@ -31,6 +34,16 @@ jobs:
         run: |
           git clone --depth 1 --branch main/1.0 https://github.com/OpenRFStack/SdrSdk.git ../SdrSdk
           git clone --depth 1 --branch main/1.0 https://github.com/OpenRFStack/SdrTaskApi.git ../SdrTaskApi
+
+      - name: Build libpqxx from source
+        run: |
+          git clone --depth 1 --branch 7.9.0 https://github.com/jtv/libpqxx.git /tmp/libpqxx
+          cmake -B /tmp/libpqxx-build -S /tmp/libpqxx \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_SHARED_LIBS=ON \
+            -DBUILD_TESTING=OFF
+          cmake --build /tmp/libpqxx-build --parallel
+          cmake --install /tmp/libpqxx-build
 
       - name: Build
         run: |
