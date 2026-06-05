@@ -40,6 +40,7 @@ add_executable(acq_tests
     unit/test_spectrum_scanner.cpp
     unit/test_p25_grant_consumer.cpp
     unit/test_threat_detection.cpp
+    unit/test_multi_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/FftProcessor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/SweepConfig.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/SpectrumScanner.cpp

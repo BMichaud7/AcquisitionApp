@@ -221,6 +221,32 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
 }
 
 
+std::vector<BandConfig> SweepConfig::splitBands(const std::vector<BandConfig>& bands,
+                                                   int n_devices) {
+    if (n_devices <= static_cast<int>(bands.size())) return bands;
+
+    std::vector<BandConfig> out;
+    out.reserve(static_cast<size_t>(n_devices));
+    const int nb        = static_cast<int>(bands.size());
+    const int base      = n_devices / nb;
+    const int remainder = n_devices % nb;
+
+    for (int i = 0; i < nb; ++i) {
+        const int    pieces = base + (i < remainder ? 1 : 0);
+        const double lo     = bands[i].start_hz.in(au::hertz);
+        const double hi     = bands[i].stop_hz.in(au::hertz);
+        const double step   = (hi - lo) / pieces;
+        for (int j = 0; j < pieces; ++j) {
+            BandConfig bc;
+            bc.device_id = bands[i].device_id;
+            bc.start_hz  = au::hertz(lo + j       * step);
+            bc.stop_hz   = au::hertz(lo + (j + 1) * step);
+            out.push_back(bc);
+        }
+    }
+    return out;
+}
+
 } // namespace acq
 
 /*

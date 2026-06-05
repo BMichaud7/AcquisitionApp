@@ -203,6 +203,32 @@ struct SweepConfig {
      * @throws std::runtime_error if the file cannot be opened or parsed.
      */
     static SweepConfig from_file(const std::string& path);
+
+    /**
+     * @brief Distribute @p n_devices across @p bands by subdividing each band
+     *        into equal frequency slices.
+     *
+     * Called at startup after queryDeviceCount() to ensure every available
+     * SDR covers a unique non-overlapping frequency range.
+     *
+     * If n_devices ≤ bands.size() the input is returned unchanged (no split).
+     * Otherwise each band is divided into (n_devices / bands.size()) slices,
+     * with the remainder distributed one extra slice to the first bands:
+     *
+     * @code
+     *   splitBands({[70–6000]},     4) → 4 equal slices of [70–6000]
+     *   splitBands({[70–1100],[1100–6000]}, 4) → each band → 2 slices (4 total)
+     *   splitBands({A,B,C},         4) → A→2 slices, B→1, C→1 (4 total)
+     *   splitBands({A,B,C,D},       4) → 1:1, no split
+     *   splitBands({A,B,C,D,E},     4) → unchanged (5 > 4)
+     * @endcode
+     *
+     * @param bands     Input bands (must be non-empty).
+     * @param n_devices Number of online devices reported by SdrRM.
+     * @return Expanded band list with device_id inherited from the parent band.
+     */
+    static std::vector<BandConfig> splitBands(const std::vector<BandConfig>& bands,
+                                               int n_devices);
 };
 
 } // namespace acq
