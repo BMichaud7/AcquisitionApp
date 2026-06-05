@@ -37,7 +37,10 @@ jobs:
 
       - name: Build libpqxx from source
         run: |
-          git clone --depth 1 --branch 7.7.4 https://github.com/jtv/libpqxx.git /tmp/libpqxx
+          git clone --depth 1 --branch 7.9.0 https://github.com/jtv/libpqxx.git /tmp/libpqxx
+          # Patch cmake config that calls internal cmake_determine_compile_features
+          # (removed in cmake 3.28, which Rocky 9 ships)
+          sed -i '/cmake_determine_compile_features/d' /tmp/libpqxx/cmake/config.cmake
           cmake -B /tmp/libpqxx-build -S /tmp/libpqxx \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DBUILD_SHARED_LIBS=ON \
