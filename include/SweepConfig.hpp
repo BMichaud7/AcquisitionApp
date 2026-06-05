@@ -94,11 +94,6 @@ struct ReceiverConfig {
 };
 
 /**
- * @brief Top-level configuration for AcquisitionApp.
- *
- * Loaded from scanner.xml via SweepConfig::from_file().
- */
-/**
  * @brief Threat detection configuration (GPS jamming/spoofing, content-layer validators).
  *
  * Controls which threat monitors are active. All disabled by default so the
@@ -125,13 +120,19 @@ struct ThreatConfig {
     std::string alert_topic{"rf.alerts"}; ///< AMQP topic alerts are published to by DemodApp.
 };
 
-/// P25 trunked-system voice channel follower config.
+/**
+ * @brief P25 trunked-system voice channel follower configuration.
+ *
+ * When enabled, AcquisitionApp subscribes to @p grant_topic and tunes a
+ * dedicated IqSource to each voice channel grant published by DemodApp,
+ * capturing IQ for @p capture_s seconds per grant.
+ */
 struct P25Config {
-    bool        enabled     = false;
-    std::string grant_topic = "rf.p25.grants"; ///< Published by DemodApp P25Monitor
-    double      capture_s   = 3.0;             ///< IQ capture per voice channel grant
-    int         rank        = 3;               ///< Priority rank for voice captures
-    std::vector<uint32_t> tg_whitelist;        ///< empty = all talk groups
+    bool        enabled{false};                        ///< Enable voice channel following.
+    std::string grant_topic{"rf.p25.grants"};          ///< AMQP topic DemodApp publishes grants to.
+    double      capture_s{3.0};                        ///< IQ capture duration per voice grant (s).
+    int         rank{3};                               ///< Preemption rank for voice captures (highest).
+    std::vector<uint32_t> tg_whitelist;                ///< Talk groups to follow; empty = all.
 };
 
 /**
@@ -178,17 +179,22 @@ struct SweepConfig {
      */
     std::vector<BandConfig>  bands;
 
-    /// Legacy: device IDs to scan simultaneously with the same sweep range.
-    /// Ignored when bands is non-empty.
-    /// Empty = scheduler picks any free device.
+    /**
+     * @brief Legacy fixed-device scan list.
+     *
+     * When non-empty and @p bands is empty, one scanner is spawned per device
+     * ID, all scanning the same sweep range. Superseded by @p bands + auto-split;
+     * kept for backwards compatibility with existing deployments.
+     */
     std::vector<std::string> scan_device_ids;
-    AmqpConfig     amqp;
-    DbConfig       db;
-    DeviceConfig   device;
-    SweepParams    sweep;
-    ReceiverConfig receiver;
-    P25Config      p25;       ///< P25 grant follower (disabled by default)
-    ThreatConfig   threat;    ///< Threat detection monitors (all disabled by default)
+
+    AmqpConfig     amqp;     ///< AMQP broker connection and topic config.
+    DbConfig       db;       ///< PostgreSQL connection config.
+    DeviceConfig   device;   ///< SDR hardware capabilities to request from SdrRM.
+    SweepParams    sweep;    ///< Frequency sweep and detection parameters (shared defaults).
+    ReceiverConfig receiver; ///< UDP IQ receive socket config.
+    P25Config      p25;      ///< P25 voice channel follower (disabled by default).
+    ThreatConfig   threat;   ///< Threat detection monitors (all disabled by default).
 
     /**
      * @brief Load SweepConfig from an XML file.

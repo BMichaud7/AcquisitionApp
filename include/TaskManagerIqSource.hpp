@@ -17,23 +17,30 @@ Contact author for permission: https://github.com/OpenRFStack
  *
  * TaskManagerIqSource implements the full scan data path:
  *
- * 1. **open()** — builds a SCAN task request from SweepConfig, pre-binds a
+ * 1. **queryDeviceCount()** — sends a HEALTH_QUERY to SdrRM and returns
+ *    @c controller.num_devices_online. Called once at startup so main() can
+ *    auto-split configured bands across all available devices.
+ *
+ * 2. **open()** — builds a SCAN task request from SweepConfig, pre-binds a
  *    UDP socket on the selected port, submits the task via TaskAmqpChannel
  *    (persistent connection; ~16 ms round-trip), and waits for ACCEPTED.
+ *    The dwell entry list starts from @c resume_hz_ so re-submissions after
+ *    preemption continue the sweep rather than restarting from start_hz.
  *
- * 2. **next()** — receives CF32 IQ packets over UDP, accumulates samples into
+ * 3. **next()** — receives CF32 IQ packets over UDP, accumulates samples into
  *    per-channel buffers, and returns a complete Dwell each time the controller
  *    signals a retune (IQ_FLAG_DWELL_CHANGE) or @p dwell_samples have arrived.
+ *    Updates @c resume_hz_ on every packet so preemption position is always current.
  *
- * 3. **close()** — sends TASK_STOP and closes the socket.
+ * 4. **close()** — sends TASK_STOP and closes the socket.
  *
  * The persistent AMQP channel (TaskAmqpChannel) pays the Artemis connection
  * setup cost once at startup rather than on every task submission, reducing
  * per-submission latency from ~30 s (new connection) to ~16 ms.
  *
  * The UDP socket is pre-bound before submitTask() and the port is included in
- * the dest_ports[] field of the task request.  This eliminates the race
- * between task acceptance and the first IQ packet arriving.
+ * the dest_ports[] field of the task request, eliminating the race between
+ * task acceptance and the first IQ packet arriving.
  */
 #include "IqSource.hpp"
 #include "SweepConfig.hpp"
@@ -103,32 +110,51 @@ public:
     int  numChannels() const override { return cfg_.device.rx_channels; }
 
 private:
-    SweepConfig      cfg_;
-    std::string      preferred_device_;  ///< Requested device ID; empty = any.
-    int              udp_fd_{-1};        ///< UDP receive socket file descriptor.
-    std::string      task_id_;           ///< Controller-assigned task UUID.
-    std::atomic<bool> running_{false};
+    SweepConfig       cfg_;
+    std::string       preferred_device_;        ///< Requested device ID; empty = any free device.
+    int               udp_fd_{-1};              ///< UDP receive socket file descriptor.
+    std::string       task_id_;                 ///< Controller-assigned task UUID for TASK_STOP.
+    std::atomic<bool> running_{false};          ///< Set false by stop() to break the next() loop.
 
-    std::vector<std::vector<std::complex<float>>> ch_accum_; ///< Per-channel sample accumulators.
+    std::vector<std::vector<std::complex<float>>> ch_accum_; ///< Per-channel IQ sample accumulators.
+
+    /// LO centre frequency of the dwell currently being accumulated.
     au::QuantityD<au::Hertz> current_center_hz_{au::hertz(0.0)};
-    /// Start frequency for the next task submission. Advances past the last
-    /// completed dwell so re-submissions continue the sweep rather than
-    /// restarting from start_hz after each preemption.
+
+    /// Start frequency for the next SCAN task submission.
+    /// Updated on every received packet to track sweep position. When the
+    /// task ends (sweep complete or preemption), buildScanRequest() starts
+    /// the next entry list from here, wrapping start_hz → resume_hz after
+    /// stop_hz, so every frequency is visited once per task regardless of
+    /// where the previous task was interrupted.
     au::QuantityD<au::Hertz> resume_hz_{au::hertz(0.0)};
-    std::vector<uint8_t> pkt_buf_;  ///< Pre-allocated UDP receive buffer.
 
-    void         bindUdp(uint16_t port);
-    uint16_t     submitTask();
-    void         sendTaskStop();
-    std::string  buildScanRequest(const std::string& req_id) const;
-    void         resetAccum();
+    std::vector<uint8_t> pkt_buf_;             ///< Pre-allocated 64 KB UDP receive buffer.
 
-    /// Persistent AMQP channel — connects once at startup.
-    /// Reduces task submission latency from ~30 s (new connection) to ~16 ms.
+    /// @brief Bind a UDP socket to @p port (0 = OS-assigned).
+    void        bindUdp(uint16_t port);
+
+    /// @brief Submit TASK_REQUEST_SCAN to SdrRM and return the allocated UDP port.
+    /// @throws std::runtime_error on rejection or timeout.
+    uint16_t    submitTask();
+
+    /// @brief Send TASK_STOP for the current task_id_ (fire-and-forget).
+    void        sendTaskStop();
+
+    /// @brief Build the SCAN task JSON body with dwell entries from resume_hz_.
+    std::string buildScanRequest(const std::string& req_id) const;
+
+    /// @brief Reset per-channel accumulators and current_center_hz_ to zero.
+    void        resetAccum();
+
+    /// Persistent AMQP channel — connects once at startup, reused for all
+    /// task submissions and health queries. Avoids the ~30 s Artemis setup
+    /// cost on every open() call.
     std::unique_ptr<TaskAmqpChannel> amqp_ch_;
 
-    /// UDP port pre-bound before submitTask() so packets arrive without a race.
-    uint16_t     prebound_port_{0};
+    /// UDP port pre-bound before submitTask() so IQ packets arrive at a ready
+    /// socket from the first frame — eliminates the TASK_ACCEPTED race window.
+    uint16_t    prebound_port_{0};
 };
 
 } // namespace acq
