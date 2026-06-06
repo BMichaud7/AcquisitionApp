@@ -69,6 +69,8 @@ jobs:
           fi
           echo "Found binary: $BIN"
           mkdir -p rpm_out
+          PQXX_LIBS=$(find /usr/lib64 /usr/local/lib64 /usr/lib /usr/local/lib -name 'libpqxx*.so*' ! -name '*.a' 2>/dev/null)
+          PQXX_ARGS=(); for lib in $PQXX_LIBS; do PQXX_ARGS+=("${lib}=/usr/lib64/$(basename ${lib})"); done
           fpm -s dir -t rpm \
             -n sdr-acquisition \
             -v "${VERSION}" \
@@ -78,7 +80,8 @@ jobs:
             --url "https://github.com/OpenRFStack/AcquisitionApp" \
             --license "Proprietary" \
             --package rpm_out/ \
-            "${BIN}=/usr/bin/sdr_acquisition"
+            "${BIN}=/usr/bin/sdr_acquisition" \
+            "${PQXX_ARGS[@]}"
           ls -lh rpm_out/
 
       - name: Upload to GitHub Release
