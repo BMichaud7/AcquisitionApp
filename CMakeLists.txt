@@ -23,12 +23,11 @@ find_package(PkgConfig REQUIRED)
 
 # ── Au (Aurora units library) ─────────────────────────────────────────────────
 include(FetchContent)
-set(AU_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(AU_EXCLUDE_TESTS_FROM_ALL ON CACHE BOOL "" FORCE)
 FetchContent_Declare(Au
     GIT_REPOSITORY https://github.com/aurora-opensource/au.git
     GIT_TAG        0.5.1
-    GIT_SHALLOW    TRUE)
+    GIT_SHALLOW    TRUE
+    EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(Au)
 
 # ── nlohmann/json ─────────────────────────────────────────────────────────────
