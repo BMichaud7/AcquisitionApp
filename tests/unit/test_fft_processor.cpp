@@ -277,7 +277,6 @@ TEST(FftProcessor, CenterBinCloserToTrueFrequencyThanBinCenter) {
     auto best = std::max_element(sigs.begin(), sigs.end(),
         [](const auto& a, const auto& b){ return a.peak_db < b.peak_db; });
     float err_interp = std::abs(best->center_bin - expected);
-    float err_integer = std::abs((float)best->peak_db - expected);  // use peak bin as proxy
     // Interpolated center should be within 0.6 bins of the true frequency.
     EXPECT_LT(err_interp, 0.6f) << "Sub-bin interpolation should place center near true freq";
 }

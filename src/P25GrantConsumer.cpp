@@ -44,7 +44,7 @@ public:
 
     void on_message(proton::delivery& d, proton::message& m) override {
         try {
-            auto j = json::parse(m.body().get<std::string>());
+            auto j = json::parse(proton::get<std::string>(m.body()));
             if (j.value("msg_type", "") != "P25_CHANNEL_GRANT") { d.accept(); return; }
 
             P25Grant g;

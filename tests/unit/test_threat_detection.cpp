@@ -189,10 +189,6 @@ TEST(GpsMonitor, CoversBothL1L2L5) {
 
 TEST(GpsMonitor, CheckIntervalRateLimits) {
     int call_count = 0;
-    auto fetch = [&](au::QuantityD<au::Hertz>, au::QuantityD<au::Hertz>, double) {
-        ++call_count;
-        return makeNoise(100, 0.0001f);
-    };
 
     // Build a minimal AlertStore-compatible object
     // (Cannot instantiate real AlertStore without a DB — use a no-op workaround)

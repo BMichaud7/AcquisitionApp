@@ -67,6 +67,11 @@ target_link_libraries(acq_tests PRIVATE
     Threads::Threads
 )
 
+# P25GrantConsumer.cpp (compiled into acq_tests above) uses qpid-proton-cpp.
+if(PROTON_FOUND)
+    target_link_libraries(acq_tests PRIVATE PkgConfig::PROTON)
+endif()
+
 target_compile_definitions(acq_tests PRIVATE
     SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_WARN
     ${_SPDLOG_DEFS}
