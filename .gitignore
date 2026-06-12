@@ -3,3 +3,6 @@ build/
 # Generated docs
 docs/html/
 docs/master/
+
+# Python
+__pycache__/
