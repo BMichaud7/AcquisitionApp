@@ -29,6 +29,7 @@ Contact author for permission: https://github.com/OpenRFStack
 #include <proton/messaging_handler.hpp>
 #include <proton/connection.hpp>
 #include <proton/connection_options.hpp>
+#include <proton/reconnect_options.hpp>
 #include <proton/sender.hpp>
 #include <proton/transport.hpp>
 #include <proton/work_queue.hpp>

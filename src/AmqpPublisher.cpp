@@ -15,6 +15,7 @@ Contact author for permission: https://github.com/OpenRFStack
 #include <sdr/Base64.hpp>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
+#include <proton/reconnect_options.hpp>
 #include <chrono>
 
 namespace acq {
@@ -64,6 +65,14 @@ void AmqpPublisher::on_container_start(proton::container& c) {
     } else {
         opts.sasl_allowed_mechs("ANONYMOUS");
     }
+    // Without this, a failed initial connection (e.g. broker not up yet) is
+    // permanent — proton tears down the container and the publisher never
+    // recovers. Retry indefinitely with backoff, matching TaskAmqpChannel.
+    proton::reconnect_options ropts;
+    ropts.delay(proton::duration(2000));
+    ropts.max_delay(proton::duration(30000));
+    ropts.max_attempts(0);
+    opts.reconnect(ropts);
     c.connect(url_, opts);
 }
 
