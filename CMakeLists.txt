@@ -9,10 +9,19 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-    # -O3 over the default -O2, plus native SIMD (SSE4/AVX2 auto-vectorisation
-    # in the Welch inner loops). -fno-math-errno keeps IEEE compliance while
-    # allowing vectorisation of transcendentals.
-    add_compile_options(-O3 -march=native -fno-math-errno)
+    # -O3 over the default -O2, plus SIMD auto-vectorisation in the Welch
+    # inner loops. -fno-math-errno keeps IEEE compliance while allowing
+    # vectorisation of transcendentals.
+    #
+    # -march=native is unsafe for release binaries: CI runners (e.g. Ampere
+    # aarch64 with ARMv8.1+ LSE atomics) support instructions that crash with
+    # SIGILL on deploy targets like the Raspberry Pi 4 (Cortex-A72, ARMv8.0-A).
+    # Use a portable baseline instead.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+        add_compile_options(-O3 -march=armv8-a -fno-math-errno)
+    else()
+        add_compile_options(-O3 -march=x86-64-v2 -fno-math-errno)
+    endif()
     # Link-time optimisation across translation units.
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()

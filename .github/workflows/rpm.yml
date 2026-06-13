@@ -44,10 +44,16 @@ jobs:
           # Patch cmake config that calls internal cmake_determine_compile_features
           # (removed in cmake 3.28, which Rocky 9 ships)
           sed -i '/CMakeDetermineCompileFeatures/d; /cmake_determine_compile_features/d' /tmp/libpqxx/cmake/config.cmake
+          # Pin a portable baseline on arm64: the GitHub-hosted aarch64 runner
+          # supports ARMv8.1+ LSE atomics, which SIGILL on Cortex-A72 deploy
+          # targets (e.g. Raspberry Pi 4) if the default target arch includes them.
+          EXTRA_CXXFLAGS=""
+          [ "$(uname -m)" = "aarch64" ] && EXTRA_CXXFLAGS="-march=armv8-a"
           cmake -B /tmp/libpqxx-build -S /tmp/libpqxx \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DBUILD_SHARED_LIBS=ON \
-            -DBUILD_TESTING=OFF
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_CXX_FLAGS="${EXTRA_CXXFLAGS}"
           cmake --build /tmp/libpqxx-build --parallel
           cmake --install /tmp/libpqxx-build
 
