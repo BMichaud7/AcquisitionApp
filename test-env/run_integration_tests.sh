@@ -30,7 +30,7 @@ podman run -d --rm --name acq-broker \
     -e ARTEMIS_USER=sdr_ctrl \
     -e ARTEMIS_PASSWORD=test_password \
     -p "${BROKER_PORT}:5672" \
-    apache/activemq-artemis:2.36.0
+    docker.io/apache/activemq-artemis:2.36.0
 
 echo -n "Waiting for broker..."
 for i in $(seq 1 30); do

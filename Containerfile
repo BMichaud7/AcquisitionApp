@@ -29,8 +29,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libsoapysdr-dev \
         soapysdr-module-remote \
         libqpid-proton-cpp12-dev \
-        libpqxx-dev \
+        libpq-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Build libpqxx 7.9.2 from source — Ubuntu 24.04's libpqxx-dev (7.8) has
+# a broken ABI (missing pqxx::conversion_overrun symbol at link time).
+RUN git clone --depth 1 --branch 7.9.2 \
+        https://github.com/jtv/libpqxx.git /tmp/libpqxx && \
+    cmake -S /tmp/libpqxx -B /tmp/libpqxx/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_TEST=OFF -DBUILD_DOC=OFF \
+        -DPostgreSQL_TYPE_INCLUDE_DIR=/usr/include/postgresql && \
+    cmake --build /tmp/libpqxx/build --parallel "$(nproc)" && \
+    cmake --install /tmp/libpqxx/build && \
+    rm -rf /tmp/libpqxx
 
 # Clone SdrSdk and SdrTaskApi as siblings (required by CMakeLists sibling detection)
 RUN git clone --depth 1 --branch "main/1.0" https://github.com/BMichaud7/SdrSdk.git /workspace/SdrSdk && \
