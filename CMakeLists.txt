@@ -175,6 +175,7 @@ if(PROTON_FOUND AND PQXX_FOUND)
         src/TaskManagerIqSource.cpp
         src/DetectionDb.cpp
         src/AmqpPublisher.cpp
+        src/GpsCache.cpp
         src/P25GrantConsumer.cpp
         src/P25Db.cpp
         src/AlertStore.cpp

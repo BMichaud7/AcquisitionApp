@@ -2,11 +2,13 @@
 #  AcquisitionApp — Unit Test Container  (CentOS Stream 10)
 #
 #  Builds and runs the acquisition unit test suite (FFT processor, sweep
-#  config, spectrum scanner).  No broker, database, or SDR hardware required.
+#  config, spectrum scanner, GPS cache).  No broker, database, or SDR hardware
+#  required.
 #
 #  SoapySDR is only needed by the test binary (FakeAcqSoapyDevice).
-#  The production binary (sdr_acquisition) is skipped — PROTON and PQXX
-#  are intentionally absent so CMake skips that target.
+#  qpid-proton-cpp-devel is needed by SdrSdk (required) and GpsCache tests.
+#  The production binary (sdr_acquisition) is skipped — PQXX is absent so
+#  CMake skips that target.
 #
 #  Build context: parent directory (contains both SdrTaskApi/ and
 #  AcquisitionApp/).
@@ -42,6 +44,7 @@ RUN dnf install -y epel-release && \
         fftw-devel \
         tinyxml2-devel \
         fmt-devel \
+        qpid-proton-cpp-devel \
     && dnf clean all
 
 # ─────────────────────────────────────────────────────────────────────────────

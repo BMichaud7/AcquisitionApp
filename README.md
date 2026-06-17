@@ -186,6 +186,7 @@ parent/
 | `googletest` | Unit tests | Auto-fetched via FetchContent |
 | `libqpid-proton-cpp12-dev` | `sdr_acquisition` binary only | AMQP broker connection |
 | `libpqxx-dev` | `sdr_acquisition` binary only | PostgreSQL detection DB |
+| `GpsCache` (internal) | `sdr_acquisition` binary only | Subscribes to `gps.location`, stamps lat/lon/alt_m on detections |
 
 ## Building
 
@@ -210,20 +211,20 @@ git clone https://github.com/BMichaud7/SdrTaskApi.git ../SdrTaskApi
 
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel $(nproc)
-ctest --test-dir build/tests --output-on-failure  # 64 unit tests
+ctest --test-dir build/tests --output-on-failure  # C++ unit tests
 ./build/tests/acq_bench                        # benchmark
 ```
 
-Test suite covers 61 cases across `FftProcessor`, `SpectrumScanner`, and `SweepConfig`.
+Test suite covers `FftProcessor`, `SpectrumScanner`, `SweepConfig`, and `GpsCache` (C++), plus `sdr_recon.py` GPS logic (Python via pytest). Both run in CI.
 
 ## Detection output
 
-Each detection published to `rf.detections` (schema version **1.2**) contains:
+Each detection published to `rf.detections` (schema version **1.3**) contains:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `msg_type` | string | Always `"RF_DETECTION"` |
-| `schema_version` | string | `"1.2"` |
+| `schema_version` | string | `"1.3"` |
 | `timestamp_ms` | integer | Unix epoch ms (UTC) |
 | `scanner_id` | string | From config `<scanner_id>` |
 | `channel` | integer | RX channel index (0-based) |
@@ -233,6 +234,9 @@ Each detection published to `rf.detections` (schema version **1.2**) contains:
 | `snr_db` | number | **v1.2+** PAPR of detected signal group (peak − mean, dB). Used by DfApp SNR filter. |
 | `iq_snapshot_b64` | string | **v1.2+** 1 024 complex samples encoded as base64 raw `float32` bytes (~11 KB). Decoders should check for this key first. |
 | `snapshot_sample_rate_sps` | number | **v1.1+** Sample rate of IQ snapshot (Hz). |
+| `lat` | number or null | **v1.3+** GPS latitude (°, WGS-84) from GpsApp at time of detection. Null when GpsApp not running or no fix. |
+| `lon` | number or null | **v1.3+** GPS longitude (°, WGS-84) from GpsApp at time of detection. Null when GpsApp not running or no fix. |
+| `alt_m` | number or null | **v1.3+** GPS altitude above MSL (m) from GpsApp. Null when no fix. |
 
 > **Backward compat**: receivers that only understand schema 1.1 can fall back to
 > the `iq_snapshot` JSON float array key (still accepted by AnalysisApp and DfApp).
@@ -247,6 +251,25 @@ The full JSON Schema is in [`schema/rf_detection.schema.json`](schema/rf_detecti
 | 1.0 | Initial release |
 | 1.1 | Added `iq_snapshot` + `snapshot_sample_rate_sps` (JSON float array) |
 | 1.2 | `iq_snapshot_b64` (base64 binary, replaces 1.1 array); added `snr_db` |
+| 1.3 | Added `lat`, `lon`, `alt_m` GPS fields (from GpsApp via `gps.location` topic) |
+
+## GPS position stamping
+
+When GpsApp is running and has a GPS fix, each detection is stamped with the
+scanner's position at the time of detection. The position comes from GpsApp's
+`gps.location` AMQP topic — GpsApp is the sole GPS source; AcquisitionApp never
+reads gpsd directly.
+
+A `GpsCache` subscriber runs in a background thread alongside the sweep loop.
+When `on_detection` fires, it calls `gps_cache->get()` and copies the latest
+`{lat, lon, alt_m}` into the `Detection` struct before pushing to `DetectionDb`
+and `AmqpPublisher`. If GpsApp is not running, the fields are `std::nullopt`
+and the `signals` table columns stay `NULL`.
+
+The `signals` table columns `lat`, `lon`, `alt_m` are written only on the
+**first INSERT** for a new signal — they record where the scanner was when it
+first observed the signal. Subsequent `UPDATE` calls (updating `last_seen`,
+`power_db`, `hits`) do not overwrite the position.
 
 ## AnalysisApp co-existence
 

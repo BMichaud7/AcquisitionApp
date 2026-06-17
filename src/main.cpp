@@ -28,6 +28,7 @@ Contact author for permission: https://github.com/OpenRFStack
 #include "DetectionDb.hpp"
 #include "AmqpPublisher.hpp"
 #include "P25GrantConsumer.hpp"
+#include "GpsCache.hpp"
 #include "P25Db.hpp"
 #include <au/units/hertz.hh>
 #include <au/units/seconds.hh>
@@ -111,9 +112,30 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // ── GPS position cache — subscribes to gps.location ──────────────────
+    std::unique_ptr<acq::GpsCache> gps_cache;
+    if (amqp_ok) {
+        try {
+            gps_cache = std::make_unique<acq::GpsCache>(
+                cfg.amqp.url, cfg.amqp.username, cfg.amqp.password);
+            gps_cache->start();
+            spdlog::info("GPS cache started — listening on gps.location");
+        } catch (const std::exception& e) {
+            spdlog::warn("GPS cache failed to start: {} — detections will have no position", e.what());
+        }
+    }
+
     auto on_detection = [&](const acq::Detection& d) {
-        if (db_ok)   db->push(d);
-        if (amqp_ok) amqp->publish(d);
+        acq::Detection stamped = d;
+        if (gps_cache) {
+            if (auto fix = gps_cache->get()) {
+                stamped.lat   = fix->lat;
+                stamped.lon   = fix->lon;
+                stamped.alt_m = fix->alt_m;
+            }
+        }
+        if (db_ok)   db->push(stamped);
+        if (amqp_ok) amqp->publish(stamped);
     };
 
     // ── IQ sources + scanners ────────────────────────────────────────────────
@@ -280,6 +302,7 @@ int main(int argc, char* argv[]) {
     spdlog::info("Stopping...");
     if (p25) p25->stop();
     for (auto& s : scanners) s->stop();
+    gps_cache.reset();
     amqp.reset();
     db.reset();
     spdlog::info("Shutdown complete");

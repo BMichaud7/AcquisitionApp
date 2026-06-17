@@ -22,6 +22,7 @@ Contact author for permission: https://github.com/OpenRFStack
 #include <au/units/seconds.hh>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <cstdint>
 #include <vector>
@@ -57,6 +58,13 @@ struct Detection {
     /// Null when no snapshot was collected (unit tests or snapshot disabled).
     std::shared_ptr<const std::vector<float>> iq_snapshot;
     au::QuantityD<au::Hertz> snapshot_sample_rate_sps{au::hertz(0.0)}; ///< Sample rate of the IQ snapshot.
+
+    /// @name GPS position (from GpsApp — nullopt when GpsApp is not running or has no fix)
+    /// @{
+    std::optional<double> lat;   ///< Latitude (decimal degrees, WGS-84) at time of detection.
+    std::optional<double> lon;   ///< Longitude (decimal degrees, WGS-84) at time of detection.
+    std::optional<double> alt_m; ///< Altitude above MSL (metres) at time of detection.
+    /// @}
 };
 
 } // namespace acq

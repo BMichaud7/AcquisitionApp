@@ -43,7 +43,12 @@ CREATE TABLE IF NOT EXISTS signals (
     fast_path       BOOLEAN             NOT NULL DEFAULT false,
     reject_reason   TEXT                NOT NULL DEFAULT '',
 
-    hits            INTEGER             NOT NULL DEFAULT 1
+    hits            INTEGER             NOT NULL DEFAULT 1,
+
+    -- GPS position at time of first detection (NULL when no GPS fix available)
+    lat             DOUBLE PRECISION,
+    lon             DOUBLE PRECISION,
+    alt_m           REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_signals_freq     ON signals (freq_hz);
@@ -204,3 +209,30 @@ SELECT
 FROM rf_alerts
 WHERE detected_at > now() - INTERVAL '1 hour'
 ORDER BY detected_at DESC;
+
+-- ── Passive recon captures (sdr_recon.py) ────────────────────────────────────
+-- One row per IQ file saved by the recon recorder.
+CREATE TABLE IF NOT EXISTS recon_captures (
+    id              BIGSERIAL           PRIMARY KEY,
+    captured_at     TIMESTAMPTZ         NOT NULL DEFAULT now(),
+
+    center_freq_hz  DOUBLE PRECISION    NOT NULL,
+    bandwidth_hz    DOUBLE PRECISION,
+    sample_rate_sps DOUBLE PRECISION,
+    snr_db_trigger  REAL,
+    power_db        REAL,
+    capture_s       REAL,
+    num_samples     BIGINT,
+
+    -- File saved to /recon (path relative to RECON_OUT)
+    file_path       TEXT                NOT NULL,
+    format          TEXT                NOT NULL DEFAULT 'cf32',
+
+    -- GPS position when the capture was taken (NULL if no fix)
+    lat             DOUBLE PRECISION,
+    lon             DOUBLE PRECISION,
+    alt_m           REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_recon_freq ON recon_captures (center_freq_hz);
+CREATE INDEX IF NOT EXISTS idx_recon_time ON recon_captures (captured_at DESC);

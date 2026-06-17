@@ -31,7 +31,7 @@ else()
 endif()
 
 # ── Test binary ───────────────────────────────────────────────────────────────
-# Sources: FftProcessor + SweepConfig + SpectrumScanner (no TaskManagerIqSource,
+# Sources: FftProcessor + SweepConfig + SpectrumScanner + GpsCache (no TaskManagerIqSource,
 # no DetectionDb, no AmqpPublisher — none of those are under test here).
 add_executable(acq_tests
     fake_soapy/FakeAcqSoapyDevice.cpp
@@ -41,10 +41,12 @@ add_executable(acq_tests
     unit/test_p25_grant_consumer.cpp
     unit/test_threat_detection.cpp
     unit/test_multi_device.cpp
+    unit/test_gps_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/FftProcessor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/SweepConfig.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/SpectrumScanner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/P25GrantConsumer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/GpsCache.cpp
 )
 
 target_include_directories(acq_tests PRIVATE

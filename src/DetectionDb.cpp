@@ -54,12 +54,19 @@ DetectionDb::DetectionDb(const std::string& conn_str, int batch_size,
             onnx_confidence REAL             DEFAULT 0,
             fast_path       BOOLEAN          NOT NULL DEFAULT false,
             reject_reason   TEXT             NOT NULL DEFAULT '',
-            hits            INTEGER          NOT NULL DEFAULT 1
+            hits            INTEGER          NOT NULL DEFAULT 1,
+            lat             DOUBLE PRECISION,
+            lon             DOUBLE PRECISION,
+            alt_m           REAL
         );
         CREATE INDEX IF NOT EXISTS idx_signals_freq    ON signals (freq_hz);
         CREATE INDEX IF NOT EXISTS idx_signals_time    ON signals (last_seen DESC);
         CREATE INDEX IF NOT EXISTS idx_signals_unclass ON signals (classified, last_seen DESC)
             WHERE classified = false;
+        -- Add GPS columns to existing databases that predate this schema version
+        ALTER TABLE signals ADD COLUMN IF NOT EXISTS lat   DOUBLE PRECISION;
+        ALTER TABLE signals ADD COLUMN IF NOT EXISTS lon   DOUBLE PRECISION;
+        ALTER TABLE signals ADD COLUMN IF NOT EXISTS alt_m REAL;
     )");
     txn.commit();
 
@@ -165,21 +172,29 @@ void DetectionDb::flush(std::vector<Detection>& batch) {
         } else {
             // First time this signal has been seen — insert unclassified row.
             // AnalysisApp will fill in modulation/classification after IQ collection.
+            std::optional<double> lat_opt = d.lat;
+            std::optional<double> lon_opt = d.lon;
+            std::optional<float>  alt_opt = d.alt_m.has_value()
+                                            ? std::optional<float>(static_cast<float>(*d.alt_m))
+                                            : std::nullopt;
             txn.exec_params(
                 "INSERT INTO signals "
                 "(first_seen, last_seen, freq_hz, freq_mhz, bandwidth_hz, "
-                " power_db, scanner_id, channel) "
+                " power_db, scanner_id, channel, lat, lon, alt_m) "
                 "VALUES ("
                 "  to_timestamp($1::double precision / 1000.0), "
                 "  to_timestamp($1::double precision / 1000.0), "
-                "  $2, $3, $4, $5, $6, $7)",
+                "  $2, $3, $4, $5, $6, $7, $8, $9, $10)",
                 ms,
                 center_freq_raw,
                 center_freq_raw / 1e6,
                 bw_opt,
                 d.power_db,
                 d.scanner_id,
-                d.channel);
+                d.channel,
+                lat_opt,
+                lon_opt,
+                alt_opt);
         }
     }
 
