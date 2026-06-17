@@ -14,15 +14,15 @@
 AcquisitionApp integration tests — fake controller + IQ streamer.
 
 Acts as a fake SdrResourceManager.  Verifies the scanner:
-  1. Submits a well-formed TASK_REQUEST_SCAN
-  2. Binds UDP to the port the fake controller allocates (not a random port)
+  1. Submits a well-formed TASK_REQUEST_SCAN with dest_ports[] (pre-bind protocol)
+  2. Re-binds to the port the controller assigns in udp_port (if different)
   3. Receives IQ packets and publishes detections to rf.detections
-  4. Sends TASK_STOP when shut down
+  4. Retries after a REJECTED response
 
 Test cases
 ----------
-1. udp_port_protocol   Controller allocates port; scanner must bind to returned udp_port
-2. task_request_format TASK_REQUEST_SCAN has required fields (no dest_ports)
+1. udp_port_protocol   Scanner pre-binds and sends dest_ports; controller assigns port
+2. task_request_format TASK_REQUEST_SCAN has required fields (including dest_ports)
 3. detections_published After IQ stream, detections appear on rf.detections
 4. task_stop_on_reject  When task is rejected, scanner retries (no crash)
 
@@ -114,11 +114,14 @@ class _Base(proton.handlers.MessagingHandler):
         return conn
 
     def _open_sender(self, conn, addr):
-        s = self._container.create_sender(conn, addr)
-        self._senders[addr] = s
-        return s
+        if addr not in self._senders:
+            s = self._container.create_sender(conn, addr)
+            self._senders[addr] = s
+        return self._senders[addr]
 
-    def _send(self, addr, body):
+    def _send(self, addr, body, conn=None):
+        if addr not in self._senders:
+            self._open_sender(conn, addr)
         msg = proton.Message(body=json.dumps(body),
                              content_type="application/json")
         self._senders[addr].send(msg)
@@ -152,8 +155,7 @@ class _ScanFlowHandler(_Base):
         self._task_id:       str = ""
 
     def on_start(self, event):
-        conn = self._connect(event, "sdr.task.request", "rf.detections")
-        self._open_sender(conn, "sdr.task.response")
+        self._conn = self._connect(event, "sdr.task.request", "rf.detections")
 
     def on_message(self, event):
         body = self._parse(event)
@@ -173,15 +175,16 @@ class _ScanFlowHandler(_Base):
             if not self._responded and "REQUEST" in msg_type:
                 self.task_req    = body
                 self._responded  = True
-                req_id  = body.get("request_id", "")
-                dest_ip = body.get("streaming", {}).get("dest_ip", "127.0.0.1")
-                cf      = body.get("rf", {}).get("center_freq_hz", 101e6)
-                sr      = body.get("rf", {}).get("sample_rate_sps", 2e6)
+                reply_to = event.message.reply_to or ""
+                req_id   = body.get("request_id", "")
+                dest_ip  = body.get("streaming", {}).get("dest_ip", "127.0.0.1")
+                cf       = body.get("rf", {}).get("center_freq_hz", 101e6)
+                sr       = body.get("rf", {}).get("sample_rate_sps", 2e6)
                 self.udp_port    = _alloc_port()
                 self._task_id    = str(uuid.uuid4())
 
-                print(f"  [ctrl] ← TASK_REQUEST msg_type={msg_type}  allocating port {self.udp_port}")
-                self._send("sdr.task.response", {
+                print(f"  [ctrl] ← TASK_REQUEST msg_type={msg_type}  reply_to={reply_to!r}  allocating port {self.udp_port}")
+                self._send(reply_to, {
                     "msg_type":   "TASK_RESPONSE",
                     "request_id": req_id,
                     "task_id":    self._task_id,
@@ -195,7 +198,7 @@ class _ScanFlowHandler(_Base):
                         "sample_rate_sps": sr,
                         "format":          "CF32",
                     }],
-                })
+                }, conn=event.connection)
                 print(f"  [ctrl] → TASK_RESPONSE ACCEPTED  udp_port={self.udp_port}")
                 threading.Thread(
                     target=_stream_iq,
@@ -206,17 +209,6 @@ class _ScanFlowHandler(_Base):
         elif addr == "rf.detections":
             self.detection = body
             print(f"  [ctrl] ← rf.detections  {body.get('center_freq_hz',0)/1e6:.2f} MHz  {body.get('power_db',0):.1f} dB")
-            # Send TASK_STOP so scanner can start fresh for the next test
-            if self._task_id:
-                self._send("sdr.task.response", {
-                    "msg_type":     "TASK_RESPONSE",
-                    "request_id":   str(uuid.uuid4()),
-                    "task_id":      self._task_id,
-                    "status":       "ACCEPTED",
-                    "reject_reason": "test complete",
-                    "timestamp_ms": int(time.time() * 1000),
-                    "streams":      [],
-                })
             event.connection.close()
 
 
@@ -233,8 +225,7 @@ class _RejectThenAcceptHandler(_Base):
         self._reject_count = 0
 
     def on_start(self, event):
-        conn = self._connect(event, "sdr.task.request", "rf.detections")
-        self._open_sender(conn, "sdr.task.response")
+        self._connect(event, "sdr.task.request", "rf.detections")
 
     def on_message(self, event):
         body = self._parse(event)
@@ -243,11 +234,12 @@ class _RejectThenAcceptHandler(_Base):
         addr = event.receiver.source.address
 
         if addr == "sdr.task.request" and "REQUEST" in body.get("msg_type", ""):
-            req_id = body.get("request_id", "")
+            req_id   = body.get("request_id", "")
+            reply_to = event.message.reply_to or ""
             if self._reject_count == 0:
                 self._reject_count += 1
                 print(f"  [ctrl] ← TASK_REQUEST #{self._reject_count} — rejecting")
-                self._send("sdr.task.response", {
+                self._send(reply_to, {
                     "msg_type":     "TASK_RESPONSE",
                     "request_id":   req_id,
                     "task_id":      "",
@@ -255,7 +247,7 @@ class _RejectThenAcceptHandler(_Base):
                     "reject_reason":"test rejection",
                     "timestamp_ms": int(time.time() * 1000),
                     "streams":      [],
-                })
+                }, conn=event.connection)
             else:
                 self.second_task_req = body
                 dest_ip = body.get("streaming", {}).get("dest_ip", "127.0.0.1")
@@ -263,7 +255,7 @@ class _RejectThenAcceptHandler(_Base):
                 sr      = body.get("rf", {}).get("sample_rate_sps", 2e6)
                 port    = _alloc_port()
                 print(f"  [ctrl] ← TASK_REQUEST #{self._reject_count+1} — accepting  port={port}")
-                self._send("sdr.task.response", {
+                self._send(reply_to, {
                     "msg_type":   "TASK_RESPONSE",
                     "request_id": req_id,
                     "task_id":    str(uuid.uuid4()),
@@ -272,7 +264,7 @@ class _RejectThenAcceptHandler(_Base):
                     "streams": [{"channel_index": 0, "udp_ip": dest_ip,
                                  "udp_port": port, "center_freq_hz": cf,
                                  "sample_rate_sps": sr, "format": "CF32"}],
-                })
+                }, conn=event.connection)
                 threading.Thread(
                     target=_stream_iq,
                     args=(dest_ip, port, cf, sr),
@@ -306,10 +298,10 @@ def run_udp_port_protocol(broker):
     print("\n── Test 1: udp_port_protocol ───────────────────────────────────")
     h = _run(_ScanFlowHandler(broker))
     if h.error: print(f"  AMQP error: {h.error}"); return False
+    dest_ports = h.task_req and h.task_req.get("streaming",{}).get("dest_ports")
     checks = [
         ("TASK_REQUEST received",           h.task_req is not None),
-        ("request has no dest_ports",       h.task_req and
-                                             h.task_req.get("streaming",{}).get("dest_ports") is None),
+        ("request has dest_ports (pre-bind)", bool(dest_ports)),
         ("controller allocated udp_port",   h.udp_port > 0),
         ("detections published (app got IQ)", h.detection is not None),
     ]
@@ -330,7 +322,7 @@ def run_task_request_format(broker):
         ("has rf.sample_rate_sps",    req.get("rf",{}).get("sample_rate_sps",0) > 0),
         ("has scan_params.entries",   bool(req.get("scan_params",{}).get("entries"))),
         ("has streaming.dest_ip",     bool(req.get("streaming",{}).get("dest_ip"))),
-        ("no streaming.dest_ports",   req.get("streaming",{}).get("dest_ports") is None),
+        ("has streaming.dest_ports",   req.get("streaming",{}).get("dest_ports") is not None),
         ("rank field present",        "rank" in req),
     ]
     return _report(checks)
