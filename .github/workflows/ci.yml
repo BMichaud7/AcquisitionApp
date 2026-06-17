@@ -62,5 +62,5 @@ jobs:
 
       - name: Run Python GPS tests
         run: |
-          pip3 install pytest --quiet
+          pip3 install pytest numpy --quiet --break-system-packages
           python3 -m pytest tests/unit/test_sdr_recon_gps.py -v
