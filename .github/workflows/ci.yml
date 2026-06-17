@@ -61,4 +61,6 @@ jobs:
         run: ctest --test-dir build/tests --output-on-failure -V --timeout 60
 
       - name: Run Python GPS tests
-        run: python3 -m pytest tests/unit/test_sdr_recon_gps.py -v
+        run: |
+          pip3 install pytest --quiet
+          python3 -m pytest tests/unit/test_sdr_recon_gps.py -v
