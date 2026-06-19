@@ -91,6 +91,13 @@ public:
         if (container_) {
             if (wq_)
                 wq_->add([this]{ sender_.connection().close(); });
+            else
+                // Connection never reached on_receiver_open (e.g. Artemis was
+                // still starting), so there's no work queue to post a close
+                // through. reconnect_options has max_attempts(0) — infinite
+                // retries — so without this, container_->run() never returns
+                // and thread_.join() below blocks forever.
+                container_->stop();
             if (thread_.joinable()) thread_.join();
             container_.reset();
         }

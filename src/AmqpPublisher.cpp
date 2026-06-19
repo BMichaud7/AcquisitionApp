@@ -41,6 +41,13 @@ void AmqpPublisher::stop() {
     if (container_) {
         if (work_queue_)
             work_queue_->add([this]{ sender_.connection().close(); });
+        else
+            // Connection never reached on_sender_open, so there's no work
+            // queue to post a close through. reconnect_options above sets
+            // max_attempts(0) — infinite retries — so without this,
+            // container_->run() never returns and thread_.join() blocks
+            // forever.
+            container_->stop();
         if (thread_.joinable()) thread_.join();
         delete container_;
         container_ = nullptr;
