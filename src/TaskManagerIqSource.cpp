@@ -428,7 +428,14 @@ int TaskManagerIqSource::queryDeviceCount() {
         {"timestamp_ms",   now_ms},
         {"request_id",     req_id}
     };
-    auto resp = amqp_ch_->exchange(req.dump(), req_id, 10000);
+    // exchange()'s timeout_ms gates both "wait for the channel to connect"
+    // and "wait for the response" as two independent windows -- a cold
+    // Artemis pod (image pull + JVM boot) can take 90-100s+ to start
+    // accepting AMQP connections, so 10s here was timing out on the first
+    // wait alone, well before the connection even succeeded, and silently
+    // falling back to "assume 1 device" -- which then skips multi-device
+    // band-splitting in main.cpp even when N devices are genuinely online.
+    auto resp = amqp_ch_->exchange(req.dump(), req_id, 120000);
     if (!resp.received) {
         spdlog::warn("[TaskMgrSrc] HEALTH_QUERY timed out — assuming 1 device");
         return 1;
