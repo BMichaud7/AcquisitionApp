@@ -428,16 +428,30 @@ int TaskManagerIqSource::queryDeviceCount() {
         {"timestamp_ms",   now_ms},
         {"request_id",     req_id}
     };
-    // exchange()'s timeout_ms gates both "wait for the channel to connect"
-    // and "wait for the response" as two independent windows -- a cold
-    // Artemis pod (image pull + JVM boot) can take 90-100s+ to start
-    // accepting AMQP connections, so 10s here was timing out on the first
-    // wait alone, well before the connection even succeeded, and silently
-    // falling back to "assume 1 device" -- which then skips multi-device
-    // band-splitting in main.cpp even when N devices are genuinely online.
-    auto resp = amqp_ch_->exchange(req.dump(), req_id, 120000);
+    // exchange()'s readiness wait consumes its entire timeout_ms budget
+    // before ever attempting to send+await a response (it returns
+    // immediately if the channel isn't connected yet) -- a single 120s
+    // shot isn't always enough: a cold Artemis pod has been observed
+    // taking up to ~4 min to start accepting AMQP connections on a
+    // Raspberry Pi. Retry in a loop with periodic warnings instead of
+    // giving up after one shot, mirroring the patient-retry pattern used
+    // for AMQP session bring-up elsewhere (see sdr_recon.py). Each retry
+    // re-sends the same idempotent query under the same request_id, which
+    // is harmless if an earlier attempt's response arrives late.
+    constexpr int kStepMs = 60000;
+    constexpr int kMaxWaitMs = 300000;
+    AmqpResponse resp;
+    int waited = 0;
+    while (waited < kMaxWaitMs) {
+        resp = amqp_ch_->exchange(req.dump(), req_id, kStepMs);
+        if (resp.received) break;
+        waited += kStepMs;
+        spdlog::warn("[TaskMgrSrc] HEALTH_QUERY not answered after {}s — "
+                     "controller/broker still starting?", waited / 1000);
+    }
     if (!resp.received) {
-        spdlog::warn("[TaskMgrSrc] HEALTH_QUERY timed out — assuming 1 device");
+        spdlog::warn("[TaskMgrSrc] HEALTH_QUERY timed out after {}s — assuming 1 device",
+                     kMaxWaitMs / 1000);
         return 1;
     }
     try {
