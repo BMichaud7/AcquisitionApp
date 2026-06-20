@@ -133,8 +133,21 @@ class ReconSession:
         h = _Handler(self, detection_topic, req_queue, resp_queue, gps_topic)
         self._ctr = proton.reactor.Container(h)
         threading.Thread(target=self._ctr.run, daemon=True).start()
-        if not self._ready.wait(20):
-            raise RuntimeError("AMQP session did not become ready within 20 s")
+        # Artemis can take several minutes to finish a cold start (seen up to
+        # ~4 min on a Raspberry Pi). Unlike the C++ services' AmqpClient,
+        # which logs a warning and keeps retrying forever in the background,
+        # raising here after a short fixed timeout used to crash the whole
+        # process — which the entrypoint's 3s-respawn supervisor would then
+        # restart from scratch, repeating the same short timeout and
+        # crash-looping for minutes instead of just waiting. Poll patiently
+        # with periodic warnings instead; only give up if it's truly stuck.
+        waited = 0.0
+        while not self._ready.wait(20):
+            waited += 20
+            print(f"[recon] AMQP session not ready after {waited:.0f}s — "
+                  f"still waiting for broker...", flush=True)
+            if waited >= 300:
+                raise RuntimeError("AMQP session did not become ready within 300 s")
 
     def _on_detection(self, msg: dict) -> None:
         self._on_detection_cb(msg)
