@@ -442,7 +442,11 @@ int TaskManagerIqSource::queryDeviceCount() {
     }
     try {
         auto j = json::parse(resp.body);
-        int n = j["controller"].value("num_devices_online", 1);
+        // Controller emits "online_devices" (see MessageCodec::encodeControllerHealth
+        // in SdrTaskApi) -- not "num_devices_online". A mismatched key here silently
+        // falls back to the default via .value() with no warning or exception, which
+        // is why band-splitting always saw "1 device" even with N genuinely online.
+        int n = j["controller"].value("online_devices", 1);
         spdlog::info("[TaskMgrSrc] SdrRM reports {} online device(s)", n);
         return std::max(1, n);
     } catch (...) {
