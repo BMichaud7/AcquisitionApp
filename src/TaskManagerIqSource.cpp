@@ -529,6 +529,18 @@ bool TaskManagerIqSource::next(Dwell& d) {
     while (running_) {
         ssize_t n = ::recvfrom(udp_fd_, pkt_buf_.data(), pkt_buf_.size(), 0, nullptr, nullptr);
         if (n < 0) {
+            // EINTR is not a real failure -- it just means a signal hit this
+            // thread mid-syscall (observed live: proton's AMQP container
+            // thread/timers deliver these periodically). Previously this fell
+            // through to the generic error branch below and returned false,
+            // aborting an otherwise perfectly healthy stream and forcing a
+            // full task resubmit. Confirmed via strace: a session that was
+            // successfully receiving ~9000 pkts/sec for 57s got killed by a
+            // single EINTR and had to restart from scratch -- with the SCAN
+            // task's 30s-to-first-packet budget, repeated mid-stream EINTRs
+            // are enough to make a device that's genuinely streaming data
+            // look like it never produces any.
+            if (errno == EINTR) continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 no_data_ms += 100;
                 int limit = first_packet ? INITIAL_TIMEOUT_MS : STREAM_TIMEOUT_MS;
