@@ -603,6 +603,12 @@ bool TaskManagerIqSource::next(Dwell& d) {
         if (ch < (int)ch_accum_.size())
             ch_accum_[ch].insert(ch_accum_[ch].end(), samples, samples + n_samp);
 
+        // TEMP DEBUG INSTRUMENTATION -- remove before merging.
+        static int dbg_ctr = 0;
+        if (++dbg_ctr % 64 == 0)
+            spdlog::debug("[DEBUG] ch_accum_[0].size()={} dwell_samples={} ch={} n_samp={}",
+                          ch_accum_[0].size(), cfg_.sweep.dwell_samples, ch, n_samp);
+
         // Return a complete dwell once we have enough samples on channel 0
         if ((int)ch_accum_[0].size() >= cfg_.sweep.dwell_samples) {
             d.center_hz  = current_center_hz_;
