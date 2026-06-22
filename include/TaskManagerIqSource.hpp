@@ -121,6 +121,17 @@ private:
     /// LO centre frequency of the dwell currently being accumulated.
     au::QuantityD<au::Hertz> current_center_hz_{au::hertz(0.0)};
 
+    /// True until the first packet of the current TASK (not dwell) arrives.
+    /// Must be a member, not a local in next(): next() returns once per
+    /// completed dwell, and a single task spans many dwells, so a local
+    /// would re-grant the generous 30s "stream hasn't started yet" budget
+    /// after every single dwell instead of just once per task -- including
+    /// on the final call after the controller's sweep has already finished
+    /// sending, turning every otherwise-successful task into a guaranteed
+    /// extra ~30s of dead waiting before the now-empty stream is recognized
+    /// as over. Reset only in open() (new task), not per-dwell.
+    bool first_task_packet_{true};
+
     /// Start frequency for the next SCAN task submission.
     /// Updated on every received packet to track sweep position. When the
     /// task ends (sweep complete or preemption), buildScanRequest() starts

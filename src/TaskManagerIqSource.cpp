@@ -502,6 +502,7 @@ void TaskManagerIqSource::open() {
         bindUdp(ctrl_port);
     }
     resetAccum();
+    first_task_packet_ = true;
     running_ = true;
 }
 
@@ -517,14 +518,20 @@ void TaskManagerIqSource::close() {
 
 bool TaskManagerIqSource::next(Dwell& d) {
     // Two-phase no-data timeout:
-    //  • Before the first packet arrives the SCAN task may sit in PENDING
-    //    while AnalysisApp finishes a WIDEBAND task — allow up to 60 s.
+    //  • Before the first packet of the TASK arrives the SCAN task may sit
+    //    in PENDING while AnalysisApp finishes a WIDEBAND task — allow up
+    //    to 30 s. (first_task_packet_ is a member set once per open(), not
+    //    once per call -- see its declaration for why a local here was a
+    //    bug: it silently re-granted this 30s budget after every single
+    //    completed dwell, including the final call after the controller's
+    //    sweep had already finished, so every successful task still ended
+    //    in a guaranteed ~30s of dead waiting before being recognized as
+    //    over.)
     //  • After data starts flowing the inter-dwell gap (PLL calibration) is
-    //    3-4 s; allow 20 s before declaring the stream ended.
+    //    3-4 s; allow 5 s before declaring the stream ended.
     static constexpr int INITIAL_TIMEOUT_MS = 30000;
     static constexpr int STREAM_TIMEOUT_MS  =  5000;
     int no_data_ms     = 0;
-    bool first_packet  = true;
 
     while (running_) {
         ssize_t n = ::recvfrom(udp_fd_, pkt_buf_.data(), pkt_buf_.size(), 0, nullptr, nullptr);
@@ -543,7 +550,7 @@ bool TaskManagerIqSource::next(Dwell& d) {
             if (errno == EINTR) continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 no_data_ms += 100;
-                int limit = first_packet ? INITIAL_TIMEOUT_MS : STREAM_TIMEOUT_MS;
+                int limit = first_task_packet_ ? INITIAL_TIMEOUT_MS : STREAM_TIMEOUT_MS;
                 if (no_data_ms >= limit) {
                     spdlog::info("[TaskMgrSrc] no IQ data for {}ms — task complete, re-submitting",
                                  no_data_ms);
@@ -554,7 +561,7 @@ bool TaskManagerIqSource::next(Dwell& d) {
             spdlog::error("[TaskMgrSrc] recvfrom error: {}", strerror(errno));
             return false;
         }
-        first_packet = false;
+        first_task_packet_ = false;
         no_data_ms   = 0;
         // Advance resume_hz_ on every packet so it always reflects the last
         // frequency we actually received data at. When next() returns false
@@ -602,12 +609,6 @@ bool TaskManagerIqSource::next(Dwell& d) {
         current_center_hz_ = au::hertz(static_cast<double>(hdr.center_freq_hz));
         if (ch < (int)ch_accum_.size())
             ch_accum_[ch].insert(ch_accum_[ch].end(), samples, samples + n_samp);
-
-        // TEMP DEBUG INSTRUMENTATION -- remove before merging.
-        static int dbg_ctr = 0;
-        if (++dbg_ctr % 64 == 0)
-            spdlog::debug("[DEBUG] ch_accum_[0].size()={} dwell_samples={} ch={} n_samp={}",
-                          ch_accum_[0].size(), cfg_.sweep.dwell_samples, ch, n_samp);
 
         // Return a complete dwell once we have enough samples on channel 0
         if ((int)ch_accum_[0].size() >= cfg_.sweep.dwell_samples) {
