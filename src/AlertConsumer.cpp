@@ -13,6 +13,7 @@ Contact author for permission: https://github.com/OpenRFStack
 #include "AlertConsumer.hpp"
 #include <proton/connection.hpp>
 #include <proton/connection_options.hpp>
+#include <proton/reconnect_options.hpp>
 #include <proton/delivery.hpp>
 #include <proton/message.hpp>
 #include <spdlog/spdlog.h>
@@ -69,6 +70,14 @@ void AlertConsumer::on_container_start(proton::container& c) {
     } else {
         opts.sasl_allowed_mechs("ANONYMOUS");
     }
+    // Without this, a failed initial connection (Artemis not up yet) is
+    // permanent -- this consumer would silently never receive rf.alerts
+    // again, so alerts would never get persisted to the rf_alerts table.
+    proton::reconnect_options ropts;
+    ropts.delay(proton::duration(2000));
+    ropts.max_delay(proton::duration(30000));
+    ropts.max_attempts(0);
+    opts.reconnect(ropts);
     c.connect(url_, opts);
 }
 

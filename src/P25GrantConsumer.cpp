@@ -31,6 +31,15 @@ public:
         proton::connection_options copts;
         if (!owner_.user_.empty()) copts.user(owner_.user_);
         if (!owner_.pass_.empty()) copts.password(owner_.pass_);
+        // Without this, a failed initial connection (Artemis not up yet) is
+        // permanent -- P25 channel grants would silently never be received,
+        // so SDR retune-on-grant would just never fire. Same fix as
+        // AmqpPublisher/TaskAmqpChannel elsewhere in this file's repo.
+        proton::reconnect_options ropts;
+        ropts.delay(proton::duration(2000));
+        ropts.max_delay(proton::duration(30000));
+        ropts.max_attempts(0);
+        copts.reconnect(ropts);
         c.connect(owner_.url_, copts);
     }
 

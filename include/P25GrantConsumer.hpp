@@ -33,6 +33,7 @@ Contact author for permission: https://github.com/OpenRFStack
 #include <proton/message.hpp>
 #include <proton/connection.hpp>
 #include <proton/connection_options.hpp>
+#include <proton/reconnect_options.hpp>
 #include <proton/receiver_options.hpp>
 #include <proton/source_options.hpp>
 
