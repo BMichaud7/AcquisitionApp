@@ -64,6 +64,7 @@ public:
     void insert(const RfAlert& alert);
 
 private:
+    std::string conn_str_;
     /// Pimpl: pqxx::connection is only a complete type in AlertStore.cpp.
     std::unique_ptr<pqxx::connection> conn_;
 };

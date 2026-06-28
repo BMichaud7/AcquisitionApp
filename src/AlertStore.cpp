@@ -21,7 +21,7 @@ Contact author for permission: https://github.com/OpenRFStack
 namespace acq {
 
 AlertStore::AlertStore(const std::string& conn_str)
-    : conn_(std::make_unique<pqxx::connection>(conn_str)) {}
+    : conn_str_(conn_str), conn_(std::make_unique<pqxx::connection>(conn_str)) {}
 
 // Destructor must be in .cpp so pqxx::connection is a complete type when deleted.
 AlertStore::~AlertStore() = default;
@@ -52,6 +52,12 @@ void AlertStore::insert(const RfAlert& alert) {
         tx.commit();
         spdlog::warn("[ALERT] {} {} — {}", severityName(alert.severity),
                      alertTypeName(alert.type), alert.details);
+    } catch (const pqxx::broken_connection& e) {
+        spdlog::error("[AlertStore] connection lost: {} — reconnecting", e.what());
+        try { conn_ = std::make_unique<pqxx::connection>(conn_str_); }
+        catch (const std::exception& re) {
+            spdlog::error("[AlertStore] reconnect failed: {}", re.what());
+        }
     } catch (const std::exception& e) {
         spdlog::error("[AlertStore] insert failed: {}", e.what());
     }
