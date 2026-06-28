@@ -181,18 +181,19 @@ class ReconSession:
 
 # ── IQ collection ──────────────────────────────────────────────────────────────
 
-def collect_iq(port: int, capture_s: float) -> np.ndarray:
-    """Receive UDP IQ stream for capture_s seconds.  Returns complex64 array."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
-    s.settimeout(0.3)
-    s.bind(("", port))
+def collect_iq(sock: socket.socket, capture_s: float) -> np.ndarray:
+    """Receive UDP IQ stream for capture_s seconds.  Returns complex64 array.
+
+    Takes ownership of sock and closes it when done.  The caller must have
+    already bound sock to the target port before sending the task request,
+    so no packets are missed during the bind-gap window.
+    """
     chunks: list[np.ndarray] = []
     deadline = time.time() + capture_s + TUNE_OVERHEAD_S
     try:
         while time.time() < deadline:
             try:
-                data = s.recv(65536)
+                data = sock.recv(65536)
             except socket.timeout:
                 continue
             if len(data) < IQ_HDR.size:
@@ -205,7 +206,7 @@ def collect_iq(port: int, capture_s: float) -> np.ndarray:
             if len(raw) == n * 2:
                 chunks.append(raw[0::2] + 1j * raw[1::2])
     finally:
-        s.close()
+        sock.close()
     return np.concatenate(chunks).astype(np.complex64) if chunks else np.array([], dtype=np.complex64)
 
 
@@ -293,8 +294,23 @@ class ReconRecorder:
             print(f"[recon] capture in progress — skipping {freq_hz/1e6:.4f} MHz", flush=True)
             return
 
+        # on_detection is called from the proton reactor thread.  _capture
+        # blocks for capture_s seconds and issues an rpc() that waits for
+        # an on_message response — which can never arrive while the reactor
+        # thread is stuck here.  Offload to a daemon thread so the reactor
+        # stays live.  The lock is released inside _capture_thread.
+        threading.Thread(
+            target=self._capture_thread,
+            args=(sess, freq_hz, bw_hz, snr_db, power, sr_sps, msg),
+            daemon=True,
+        ).start()
+
+    def _capture_thread(self, sess: ReconSession,
+                        freq_hz: float, bw_hz: float,
+                        snr_db: float, power_db: float,
+                        sr_sps: float, trigger_msg: dict) -> None:
         try:
-            self._capture(sess, freq_hz, bw_hz, snr_db, power, sr_sps, msg)
+            self._capture(sess, freq_hz, bw_hz, snr_db, power_db, sr_sps, trigger_msg)
         finally:
             self._record_lock.release()
 
@@ -321,47 +337,57 @@ class ReconRecorder:
             self._mark_captured(freq_hz)
             return
 
-        # Bind UDP port before sending task so we don't miss early packets
+        # Bind UDP port before sending task so we don't miss early packets.
+        # Keep the socket open — closing and rebinding in collect_iq would
+        # create a window where another process could steal the port.
+        # collect_iq takes ownership and closes; we close it ourselves on
+        # early-return paths (reject/timeout) via the finally block.
         udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
         udp_sock.settimeout(0.3)
         udp_sock.bind(("", 0))
         udp_port = udp_sock.getsockname()[1]
-        udp_sock.close()  # collect_iq re-opens on same port
+        sock_ref = [udp_sock]  # mutable cell — cleared once collect_iq takes ownership
 
-        resp = sess.rpc({
-            "msg_type": "TASK_REQUEST", "schema_version": "2.0",
-            "request_id": rid,
-            "timestamp_ms": int(now_ts * 1000),
-            "task_type": "NARROWBAND",
-            "rank": self.args.rank,
-            "schedule": {
-                "mode": "IMMEDIATE",
-                "duration_ms": int((self.args.capture_s + TUNE_OVERHEAD_S + 2) * 1000),
-            },
-            "rf": {
-                "center_freq_hz": freq_hz,
-                "bandwidth_hz":   cap_bw,
-                "sample_rate_sps": cap_sr,
-                "rx_count": 1,
-                "rx_gain_db": self.args.gain,
-            },
-            "stream": {
-                "dest_ip":   "127.0.0.1",
-                "dest_port": udp_port,
-            },
-        }, timeout=15.0)
+        try:
+            resp = sess.rpc({
+                "msg_type": "TASK_REQUEST", "schema_version": "2.0",
+                "request_id": rid,
+                "timestamp_ms": int(now_ts * 1000),
+                "task_type": "NARROWBAND",
+                "rank": self.args.rank,
+                "schedule": {
+                    "mode": "IMMEDIATE",
+                    "duration_ms": int((self.args.capture_s + TUNE_OVERHEAD_S + 2) * 1000),
+                },
+                "rf": {
+                    "center_freq_hz": freq_hz,
+                    "bandwidth_hz":   cap_bw,
+                    "sample_rate_sps": cap_sr,
+                    "rx_count": 1,
+                    "rx_gain_db": self.args.gain,
+                },
+                "stream": {
+                    "dest_ip":   "127.0.0.1",
+                    "dest_port": udp_port,
+                },
+            }, timeout=15.0)
 
-        if resp is None or resp.get("status") != "ACCEPTED":
-            reason = resp.get("reason", "timeout") if resp else "timeout"
-            print(f"[recon] task rejected: {reason}", flush=True)
-            return
+            if resp is None or resp.get("status") != "ACCEPTED":
+                reason = resp.get("reason", "timeout") if resp else "timeout"
+                print(f"[recon] task rejected: {reason}", flush=True)
+                return
 
-        actual_sr = float(resp.get("sample_rate_sps", cap_sr))
-        print(f"[recon] task ACCEPTED — collecting IQ on UDP :{udp_port} "
-              f"sr={actual_sr/1e6:.3f} MSPS ...", flush=True)
+            actual_sr = float(resp.get("sample_rate_sps", cap_sr))
+            print(f"[recon] task ACCEPTED — collecting IQ on UDP :{udp_port} "
+                  f"sr={actual_sr/1e6:.3f} MSPS ...", flush=True)
 
-        iq = collect_iq(udp_port, self.args.capture_s)
+            sock_ref[0] = None  # collect_iq now owns and will close the socket
+            iq = collect_iq(udp_sock, self.args.capture_s)
+        finally:
+            if sock_ref[0] is not None:
+                sock_ref[0].close()
+
         if len(iq) == 0:
             print("[recon] WARNING: no IQ received", flush=True)
             return
