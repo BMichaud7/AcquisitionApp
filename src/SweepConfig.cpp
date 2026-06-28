@@ -203,8 +203,8 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
 
     if (cfg.sweep.stop_hz <= cfg.sweep.start_hz)
         throw std::runtime_error("sweep stop_hz must be > start_hz");
-    if (cfg.sweep.fft_size < 64)
-        throw std::runtime_error("fft_size must be >= 64");
+    if (cfg.sweep.fft_size < 64 || (cfg.sweep.fft_size & (cfg.sweep.fft_size - 1)) != 0)
+        throw std::runtime_error("fft_size must be a power of 2 >= 64");
     if (cfg.sweep.dwell_samples < cfg.sweep.fft_size)
         cfg.sweep.dwell_samples = cfg.sweep.fft_size;
     if (cfg.sweep.usable_bw_fraction <= 0.0 || cfg.sweep.usable_bw_fraction > 1.0)
