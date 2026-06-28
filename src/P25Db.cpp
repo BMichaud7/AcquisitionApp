@@ -17,8 +17,16 @@ Contact author for permission: https://github.com/OpenRFStack
 namespace acq {
 
 struct P25Db::Impl {
+    std::string conn_str;
     pqxx::connection conn;
-    explicit Impl(const std::string& cs) : conn(cs) {}
+    explicit Impl(const std::string& cs) : conn_str(cs), conn(cs) {}
+
+    void reconnect() {
+        try { conn = pqxx::connection(conn_str); }
+        catch (const std::exception& e) {
+            spdlog::error("[P25Db] reconnect failed: {}", e.what());
+        }
+    }
 };
 
 P25Db::P25Db(const std::string& conn_str)
@@ -50,6 +58,9 @@ void P25Db::upsert_control(double freq_hz,
         tx.commit();
         spdlog::debug("[P25Db] control channel {:.4f} MHz recorded",
                       freq_hz / 1e6);
+    } catch (const pqxx::broken_connection& e) {
+        spdlog::error("[P25Db] connection lost: {} — reconnecting", e.what());
+        impl_->reconnect();
     } catch (const std::exception& e) {
         spdlog::warn("[P25Db] upsert_control failed: {}", e.what());
     }
@@ -96,6 +107,9 @@ void P25Db::upsert_grant(const P25Grant& g,
         tx.commit();
         spdlog::debug("[P25Db] grant TG={} {:.4f}MHz recorded",
                       g.talk_group, g.freq_hz / 1e6);
+    } catch (const pqxx::broken_connection& e) {
+        spdlog::error("[P25Db] connection lost: {} — reconnecting", e.what());
+        impl_->reconnect();
     } catch (const std::exception& e) {
         spdlog::warn("[P25Db] upsert_grant failed: {}", e.what());
     }
