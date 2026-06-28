@@ -190,6 +190,32 @@ TEST_F(SweepConfigTest, NonexistentFileThrows) {
         std::runtime_error);
 }
 
+TEST_F(SweepConfigTest, NonPowerOfTwoFftSizeThrows) {
+    EXPECT_THROW(parse(R"(
+        <sdr_acquisition>
+          <device><driver>rtlsdr</driver><uri></uri></device>
+          <sweep>
+            <start_hz>100000000</start_hz>
+            <stop_hz>200000000</stop_hz>
+            <fft_size>1000</fft_size>
+          </sweep>
+        </sdr_acquisition>)"),
+        std::runtime_error);
+}
+
+TEST_F(SweepConfigTest, FftSizeTooSmallThrows) {
+    EXPECT_THROW(parse(R"(
+        <sdr_acquisition>
+          <device><driver>rtlsdr</driver><uri></uri></device>
+          <sweep>
+            <start_hz>100000000</start_hz>
+            <stop_hz>200000000</stop_hz>
+            <fft_size>32</fft_size>
+          </sweep>
+        </sdr_acquisition>)"),
+        std::runtime_error);
+}
+
 // ── Edge cases ────────────────────────────────────────────────────────────────
 
 TEST_F(SweepConfigTest, DwellSamplesClampedToFftSize) {
