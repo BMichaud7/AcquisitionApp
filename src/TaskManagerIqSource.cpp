@@ -121,10 +121,7 @@ public:
             msg.body(msg_body);
             msg.content_type("application/json");
             msg.reply_to(reply_addr_);
-            if (sender_ && sender_.credit() > 0)
-                sender_.send(msg);
-            else
-                spdlog::warn("[TaskAmqpChannel] no credit — message dropped");
+            if (sender_) sender_.send(msg);
         });
         std::unique_lock<std::mutex> lk(mu_);
         result_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms),
@@ -326,8 +323,8 @@ std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) con
 
     json entries = json::array();
     int step_i = 0;
-    for (double pos = resume; pos < stop_hz;  pos += step_hz) entries.push_back(makeEntry(step_i, pos));
-    for (double pos = start_hz; pos < resume; pos += step_hz) entries.push_back(makeEntry(step_i, pos));
+    for (double pos = resume; pos + step_hz / 2.0 <= stop_hz;  pos += step_hz) entries.push_back(makeEntry(step_i, pos));
+    for (double pos = start_hz; pos + step_hz / 2.0 <= resume; pos += step_hz) entries.push_back(makeEntry(step_i, pos));
 
     std::vector<double> gains(cfg_.device.rx_channels, cfg_.device.rx_gain_db);
 
@@ -582,10 +579,20 @@ bool TaskManagerIqSource::next(Dwell& d) {
         const auto& hdr = *reinterpret_cast<const IqPacketHeader*>(pkt_buf_.data());
         if (hdr.magic != IQ_MAGIC) continue;
 
-        const auto* samples = reinterpret_cast<const std::complex<float>*>(
-            pkt_buf_.data() + sizeof(IqPacketHeader));
         int n_samp = hdr.num_samples;
         int ch     = hdr.channel_index;
+
+        // Validate declared sample count against actual received bytes to guard
+        // against truncated or malformed packets corrupting the accumulator.
+        size_t expected = sizeof(IqPacketHeader) + (size_t)n_samp * sizeof(std::complex<float>);
+        if (static_cast<size_t>(n) < expected) {
+            spdlog::warn("[TaskMgrSrc] truncated packet: {} bytes, expected {} for {} samples",
+                         n, expected, n_samp);
+            continue;
+        }
+
+        const auto* samples = reinterpret_cast<const std::complex<float>*>(
+            pkt_buf_.data() + sizeof(IqPacketHeader));
 
         // IQ_FLAG_DWELL_CHANGE: first packet of a new dwell position.
         // Return the accumulated dwell (if any), then reset.
