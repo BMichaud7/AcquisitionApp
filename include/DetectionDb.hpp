@@ -70,6 +70,7 @@ public:
     void push(const Detection& d);
 
 private:
+    std::string                 conn_str_;
     pqxx::connection            conn_;
     std::queue<Detection>       queue_;
     std::mutex                  mutex_;

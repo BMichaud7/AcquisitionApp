@@ -58,8 +58,7 @@ void AmqpPublisher::publish(const Detection& d) {
     if (!work_queue_ || stopping_) return;
     proton::message msg = makeMessage(d);
     work_queue_->add([this, msg]() mutable {
-        if (sender_ && sender_.credit() > 0)
-            sender_.send(msg);
+        if (sender_) sender_.send(msg);
     });
 }
 

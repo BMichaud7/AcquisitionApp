@@ -108,6 +108,7 @@ private:
     std::string    topic_;
     GrantHandler   on_grant_;
 
+    std::unique_ptr<Handler>           handler_;
     std::unique_ptr<proton::container> container_;
     std::thread    amqp_thread_;
     std::thread    worker_thread_;

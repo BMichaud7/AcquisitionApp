@@ -56,6 +56,16 @@ void SpectrumScanner::sweepLoop() {
         try {
             source_->open();
         } catch (const std::exception& e) {
+            // open() binds the UDP receive socket (and may submit a task)
+            // before it can throw -- a rejected/timed-out submission left
+            // that socket (each with a 50MB SO_RCVBUF request) leaked
+            // forever, since close() below was only reachable from the
+            // success path. Confirmed live: `ss -uanp` showed 7 simultaneous
+            // leaked sockets on one sdr_acquisition process after just a
+            // few retries. close() is safe to call here even on a
+            // never-fully-opened source (sendTaskStop() no-ops without a
+            // task_id_, and the fd guard handles udp_fd_ == -1).
+            source_->close();
             spdlog::error("[Scanner] source open failed: {} — retrying in 5s", e.what());
             std::this_thread::sleep_for(seconds(5));
             continue;

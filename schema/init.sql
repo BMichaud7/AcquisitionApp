@@ -101,6 +101,10 @@ CREATE INDEX IF NOT EXISTS idx_p25_site   ON p25_channels (wacn, sys_id, rfss_id
 CREATE INDEX IF NOT EXISTS idx_p25_freq   ON p25_channels (freq_hz);
 CREATE INDEX IF NOT EXISTS idx_p25_tg     ON p25_channels (talk_group);
 CREATE INDEX IF NOT EXISTS idx_p25_ctrl   ON p25_channels (is_control) WHERE is_control = true;
+-- UNIQUE (freq_hz, talk_group) treats NULL talk_group as always-distinct, so control channel
+-- rows would keep duplicating.  This partial index enforces uniqueness for control rows.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_p25_ctrl_freq ON p25_channels (freq_hz)
+    WHERE is_control = true;
 
 -- Convenience view: all P25 channels for the most recently active site
 CREATE OR REPLACE VIEW p25_site_channels AS

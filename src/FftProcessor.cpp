@@ -110,7 +110,10 @@ void FftProcessor::accumFrame(const std::complex<float>* src) {
 // ── Welch averaging ────────────────────────────────────────────────────────────
 void FftProcessor::computeSpectrum(const std::complex<float>* samples, int n_samples) {
     const int hop      = fft_size_ / 2;
-    const int n_frames = std::max(1, (n_samples - fft_size_) / hop + 1);
+    // Guard: if fewer samples than one FFT frame, leave the accumulator zeroed.
+    // std::max(1,...) would force n_frames=1 and accumFrame would OOB-read.
+    if (n_samples < fft_size_) return;
+    const int n_frames = (n_samples - fft_size_) / hop + 1;
     std::fill(linear_acc_.begin(), linear_acc_.end(), 0.f);
     for (int f = 0; f < n_frames; ++f)
         accumFrame(samples + f * hop);

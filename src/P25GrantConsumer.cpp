@@ -105,8 +105,8 @@ void P25GrantConsumer::start() {
     worker_thread_ = std::thread([this] { worker_loop(); });
 
     // AMQP thread
-    auto* h = new Handler(*this);
-    container_ = std::make_unique<proton::container>(*h);
+    handler_   = std::make_unique<Handler>(*this);
+    container_ = std::make_unique<proton::container>(*handler_);
     amqp_thread_ = std::thread([this] { container_->run(); });
 }
 
@@ -117,6 +117,7 @@ void P25GrantConsumer::stop() {
     if (amqp_thread_.joinable()) amqp_thread_.join();
     if (worker_thread_.joinable()) worker_thread_.join();
     container_.reset();
+    handler_.reset();
 }
 
 void P25GrantConsumer::enqueue(P25Grant g) {

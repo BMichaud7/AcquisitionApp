@@ -36,7 +36,7 @@ void P25Db::upsert_control(double freq_hz,
                 (freq_hz, wacn, sys_id, rfss_id, site_id,
                  channel_iden, channel_num, is_control, grant_count)
             VALUES ($1,$2,$3,$4,$5,$6,$7,true,1)
-            ON CONFLICT (freq_hz, talk_group) DO UPDATE SET
+            ON CONFLICT (freq_hz) WHERE is_control = true DO UPDATE SET
                 last_seen    = now(),
                 wacn         = EXCLUDED.wacn,
                 sys_id       = EXCLUDED.sys_id,

@@ -582,6 +582,12 @@ bool TaskManagerIqSource::next(Dwell& d) {
         int n_samp = hdr.num_samples;
         int ch     = hdr.channel_index;
 
+        // Guard against malformed header fields before any arithmetic.
+        if (n_samp <= 0 || ch < 0) {
+            spdlog::warn("[TaskMgrSrc] bad header: n_samp={} ch={}", n_samp, ch);
+            continue;
+        }
+
         // Validate declared sample count against actual received bytes to guard
         // against truncated or malformed packets corrupting the accumulator.
         size_t expected = sizeof(IqPacketHeader) + (size_t)n_samp * sizeof(std::complex<float>);

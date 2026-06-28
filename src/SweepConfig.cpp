@@ -207,6 +207,14 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         throw std::runtime_error("fft_size must be >= 64");
     if (cfg.sweep.dwell_samples < cfg.sweep.fft_size)
         cfg.sweep.dwell_samples = cfg.sweep.fft_size;
+    if (cfg.sweep.usable_bw_fraction <= 0.0 || cfg.sweep.usable_bw_fraction > 1.0)
+        throw std::runtime_error("usable_bw_fraction must be in (0, 1]");
+    if (cfg.sweep.cfar_guard_bins < 0)
+        throw std::runtime_error("cfar_guard_bins must be >= 0");
+    if (cfg.sweep.cfar_ref_bins < 1)
+        throw std::runtime_error("cfar_ref_bins must be >= 1");
+    if (cfg.sweep.noise_floor_alpha <= 0.0f || cfg.sweep.noise_floor_alpha > 1.0f)
+        throw std::runtime_error("noise_floor_alpha must be in (0, 1]");
 
     // ── Apply pending bands now that sweep defaults are set ──────────────────
     cfg.bands = std::move(pending_bands);

@@ -83,7 +83,13 @@ std::optional<GpsFix> GpsCache::parse_fix(const std::string& json_str) noexcept 
 }
 
 void GpsCache::on_message(proton::delivery&, proton::message& msg) {
-    auto fix = parse_fix(proton::get<std::string>(msg.body()));
+    std::string body;
+    try { body = proton::get<std::string>(msg.body()); }
+    catch (const std::exception& e) {
+        spdlog::warn("[GpsCache] bad message body type: {}", e.what());
+        return;
+    }
+    auto fix = parse_fix(body);
     if (!fix) {
         spdlog::warn("[GpsCache] bad message — not valid JSON");
         return;

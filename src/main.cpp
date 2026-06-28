@@ -237,6 +237,10 @@ int main(int argc, char* argv[]) {
     // Reads rf.p25.grants; for each whitelisted TG, submits a priority
     // NARROWBAND capture and publishes the resulting detections.
     // Audio decoding (IMBE→PCM→SpeechApp) is not wired yet.
+    // p25_src must outlive p25 — declare before the if block so it lives
+    // until the shutdown sequence (p25->stop() on line 303 drains any
+    // in-progress captures before p25_src is destroyed).
+    std::unique_ptr<acq::TaskManagerIqSource> p25_src;
     std::unique_ptr<acq::P25GrantConsumer> p25;
     if (cfg.p25.enabled) {
         spdlog::info("[P25] grant consumer enabled — topic={} capture={:.1f}s",
@@ -255,7 +259,7 @@ int main(int argc, char* argv[]) {
 
         // Build a one-shot IQ source for voice channel captures
         // (separate from the sweep scanner sources so grants don't interrupt sweeps)
-        auto p25_src = std::make_unique<acq::TaskManagerIqSource>(cfg, "");
+        p25_src = std::make_unique<acq::TaskManagerIqSource>(cfg, "");
 
         p25 = std::make_unique<acq::P25GrantConsumer>(
             cfg.amqp.url, cfg.amqp.username, cfg.amqp.password,
@@ -291,8 +295,6 @@ int main(int argc, char* argv[]) {
                 spdlog::info("[P25] TG={} capture complete", g.talk_group);
             });
 
-        // Transfer ownership of p25_src into the closure via shared_ptr
-        // (p25_src unique_ptr must outlive p25 consumer)
         p25->start();
     }
 

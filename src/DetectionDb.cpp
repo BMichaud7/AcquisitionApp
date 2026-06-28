@@ -21,7 +21,7 @@ using namespace std::chrono;
 
 DetectionDb::DetectionDb(const std::string& conn_str, int batch_size,
                          au::QuantityD<au::Seconds> flush_interval)
-    : conn_(conn_str), batch_size_(batch_size), flush_interval_(flush_interval)
+    : conn_str_(conn_str), conn_(conn_str), batch_size_(batch_size), flush_interval_(flush_interval)
 {
     pqxx::work txn(conn_);
     // Ensure the shared signals table exists (schema/init.sql should be run first,
@@ -107,6 +107,13 @@ void DetectionDb::workerLoop() {
 
         if (!batch.empty()) {
             try { flush(batch); }
+            catch (const pqxx::broken_connection& e) {
+                spdlog::error("[DetectionDb] connection lost: {} — reconnecting", e.what());
+                try { conn_ = pqxx::connection(conn_str_); }
+                catch (const std::exception& re) {
+                    spdlog::error("[DetectionDb] reconnect failed: {}", re.what());
+                }
+            }
             catch (const std::exception& e) {
                 spdlog::error("[DetectionDb] flush failed: {}", e.what());
             }
