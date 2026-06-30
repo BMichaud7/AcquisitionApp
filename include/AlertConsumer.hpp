@@ -34,12 +34,16 @@ Contact author for permission: https://github.com/OpenRFStack
  * @see AlertStore, AlertPublisher (DemodApp), ThreatConfig
  */
 #include "AlertStore.hpp"
+#include "RfAlert.hpp"
 #include <proton/messaging_handler.hpp>
 #include <proton/container.hpp>
 #include <proton/receiver.hpp>
 #include <thread>
 #include <string>
 #include <atomic>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
 
 namespace acq {
 
@@ -79,14 +83,22 @@ private:
     void on_message(proton::delivery& d, proton::message& msg) override;
     void on_error(const proton::error_condition& e) override;
 
-    std::string       url_;      ///< Broker URL.
-    std::string       user_;     ///< AMQP username.
-    std::string       pass_;     ///< AMQP password.
-    std::string       topic_;    ///< Subscribed topic address.
-    AlertStore&       store_;    ///< Alert persistence backend.
-    proton::container container_;///< Proton messaging container.
-    std::thread       thread_;   ///< Thread running container_.run().
-    std::atomic<bool> stopping_{false}; ///< Set true by stop() to suppress error logs.
+    void workerLoop();
+
+    std::string       url_;
+    std::string       user_;
+    std::string       pass_;
+    std::string       topic_;
+    AlertStore&       store_;
+    proton::container container_;
+    std::thread       thread_;
+    std::atomic<bool> stopping_{false};
+
+    std::mutex               work_mu_;
+    std::queue<RfAlert>      work_q_;
+    std::condition_variable  work_cv_;
+    std::thread              worker_;
+    bool                     worker_stopping_{false};
 };
 
 } // namespace acq

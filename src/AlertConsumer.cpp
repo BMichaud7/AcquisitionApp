@@ -23,6 +23,7 @@ Contact author for permission: https://github.com/OpenRFStack
 // initialiser, which references pqxx::internal::demangle_type_name — not
 // exported by the CI distro's libpqxx binary.  Parse the simple alert JSON
 // with plain string operations instead.
+#include <mutex>
 
 namespace acq {
 
@@ -52,6 +53,7 @@ AlertConsumer::AlertConsumer(std::string url, std::string user, std::string pass
 AlertConsumer::~AlertConsumer() { stop(); }
 
 void AlertConsumer::start() {
+    worker_ = std::thread([this]{ workerLoop(); });
     thread_ = std::thread([this]{ container_.run(); });
 }
 
@@ -59,6 +61,12 @@ void AlertConsumer::stop() {
     stopping_ = true;
     container_.stop();
     if (thread_.joinable()) thread_.join();
+    {
+        std::lock_guard<std::mutex> lk(work_mu_);
+        worker_stopping_ = true;
+    }
+    work_cv_.notify_one();
+    if (worker_.joinable()) worker_.join();
 }
 
 void AlertConsumer::on_container_start(proton::container& c) {
@@ -97,7 +105,6 @@ void AlertConsumer::on_message(proton::delivery& d, proton::message& msg) {
         std::string details  = jsonStr(body, "details");
         double freq_hz       = jsonDouble(body, "freq_hz");
 
-        // Map type string to AlertType
         static const std::pair<const char*, AlertType> type_map[] = {
             {"GPS_JAMMING",    AlertType::GPS_JAMMING},
             {"GPS_SPOOFING",   AlertType::GPS_SPOOFING},
@@ -125,9 +132,33 @@ void AlertConsumer::on_message(proton::delivery& d, proton::message& msg) {
         alert.severity = sev;
         alert.freq_hz  = freq_hz;
         alert.details  = details;
-        store_.insert(alert);
+
+        // store_.insert() runs a PostgreSQL transaction — do NOT call it here
+        // on the proton reactor thread. Queue it to the worker thread instead.
+        {
+            std::lock_guard<std::mutex> lk(work_mu_);
+            work_q_.push(std::move(alert));
+        }
+        work_cv_.notify_one();
     } catch (const std::exception& e) {
         spdlog::warn("[AlertConsumer] parse error: {}", e.what());
+    }
+}
+
+void AlertConsumer::workerLoop() {
+    while (true) {
+        RfAlert alert;
+        {
+            std::unique_lock<std::mutex> lk(work_mu_);
+            work_cv_.wait(lk, [this]{ return !work_q_.empty() || worker_stopping_; });
+            if (worker_stopping_ && work_q_.empty()) break;
+            alert = std::move(work_q_.front());
+            work_q_.pop();
+        }
+        try { store_.insert(alert); }
+        catch (const std::exception& e) {
+            spdlog::error("[AlertConsumer] insert error: {}", e.what());
+        }
     }
 }
 
