@@ -38,6 +38,7 @@ Contact author for permission: https://github.com/OpenRFStack
 #include <cerrno>
 #include <cstring>
 #include <chrono>
+#include <atomic>
 #include <mutex>
 #include <condition_variable>
 #include <stdexcept>
@@ -89,8 +90,8 @@ public:
 
     void stop() {
         if (container_) {
-            if (wq_)
-                wq_->add([this]{ sender_.connection().close(); });
+            if (auto* wq = wq_.load())
+                wq->add([this]{ sender_.connection().close(); });
             else
                 // Connection never reached on_receiver_open (e.g. Artemis was
                 // still starting), so there's no work queue to post a close
@@ -116,13 +117,14 @@ public:
             pending_corr_  = corr_id;
             pending_result_ = {};
         }
-        wq_->add([this, msg_body]() mutable {
-            proton::message msg;
-            msg.body(msg_body);
-            msg.content_type("application/json");
-            msg.reply_to(reply_addr_);
-            if (sender_) sender_.send(msg);
-        });
+        if (auto* wq = wq_.load())
+            wq->add([this, msg_body]() mutable {
+                proton::message msg;
+                msg.body(msg_body);
+                msg.content_type("application/json");
+                msg.reply_to(reply_addr_);
+                if (sender_) sender_.send(msg);
+            });
         std::unique_lock<std::mutex> lk(mu_);
         result_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms),
                             [this]{ return pending_result_.received; });
@@ -135,12 +137,13 @@ public:
             std::unique_lock<std::mutex> lk(mu_);
             if (!ready_) return;
         }
-        wq_->add([this, msg_body]() mutable {
-            proton::message msg;
-            msg.body(msg_body);
-            msg.content_type("application/json");
-            sender_.send(msg);
-        });
+        if (auto* wq = wq_.load())
+            wq->add([this, msg_body]() mutable {
+                proton::message msg;
+                msg.body(msg_body);
+                msg.content_type("application/json");
+                sender_.send(msg);
+            });
     }
 
     // proton callbacks ─────────────────────────────────────────────────────────
@@ -178,7 +181,7 @@ public:
     void on_receiver_open(proton::receiver& r) override {
         reply_addr_ = r.source().address();
         spdlog::info("[TaskAmqpChannel] connected, reply_to={}", reply_addr_);
-        wq_ = &r.work_queue();
+        wq_.store(&r.work_queue());
         std::lock_guard<std::mutex> lk(mu_);
         ready_ = true;
         ready_cv_.notify_all();
@@ -216,9 +219,9 @@ private:
     std::unique_ptr<proton::container> container_;
     std::thread  thread_;
 
-    proton::sender      sender_;
-    proton::work_queue* wq_{nullptr};
-    std::string         reply_addr_;
+    proton::sender                   sender_;
+    std::atomic<proton::work_queue*> wq_{nullptr};
+    std::string                      reply_addr_;
 
     std::mutex              mu_;
     std::condition_variable ready_cv_;
