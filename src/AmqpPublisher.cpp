@@ -39,8 +39,8 @@ void AmqpPublisher::start() {
 void AmqpPublisher::stop() {
     stopping_ = true;
     if (container_) {
-        if (work_queue_)
-            work_queue_->add([this]{ sender_.connection().close(); });
+        if (auto* wq = work_queue_.load())
+            wq->add([this]{ sender_.connection().close(); });
         else
             // Connection never reached on_sender_open, so there's no work
             // queue to post a close through. reconnect_options above sets
@@ -55,9 +55,10 @@ void AmqpPublisher::stop() {
 }
 
 void AmqpPublisher::publish(const Detection& d) {
-    if (!work_queue_ || stopping_) return;
+    auto* wq = work_queue_.load();
+    if (!wq || stopping_) return;
     proton::message msg = makeMessage(d);
-    work_queue_->add([this, msg]() mutable {
+    wq->add([this, msg]() mutable {
         if (sender_) sender_.send(msg);
     });
 }
@@ -87,8 +88,8 @@ void AmqpPublisher::on_connection_open(proton::connection& conn) {
 }
 
 void AmqpPublisher::on_sender_open(proton::sender& s) {
-    sender_     = s;
-    work_queue_ = &s.work_queue();
+    sender_ = s;
+    work_queue_.store(&s.work_queue());
     spdlog::info("[AmqpPublisher] connected → {}", topic_);
 }
 

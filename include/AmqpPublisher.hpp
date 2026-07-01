@@ -92,9 +92,9 @@ private:
     std::string         password_;
     std::string         topic_;
     std::string         scanner_id_;
-    proton::sender      sender_;
-    proton::work_queue* work_queue_{nullptr};
-    proton::container*  container_{nullptr};
+    proton::sender                   sender_;
+    std::atomic<proton::work_queue*> work_queue_{nullptr};
+    proton::container*               container_{nullptr};
     std::thread         thread_;
     std::atomic<bool>   stopping_{false};
 
