@@ -67,7 +67,8 @@ void SpectrumScanner::sweepLoop() {
             // task_id_, and the fd guard handles udp_fd_ == -1).
             source_->close();
             spdlog::error("[Scanner] source open failed: {} — retrying in 5s", e.what());
-            std::this_thread::sleep_for(seconds(5));
+            for (int i = 0; i < 50 && running_; ++i)
+                std::this_thread::sleep_for(milliseconds(100));
             continue;
         }
 
