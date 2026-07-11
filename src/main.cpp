@@ -173,12 +173,21 @@ int main(int argc, char* argv[]) {
         std::vector<acq::BandConfig> effective_bands = cfg.bands;
         if (effective_bands.empty()) {
             acq::BandConfig b;
-            b.start_hz = cfg.sweep.start_hz;
-            b.stop_hz  = cfg.sweep.stop_hz;
+            b.start_hz       = cfg.sweep.start_hz;
+            b.stop_hz        = cfg.sweep.stop_hz;
+            // Propagate device-level required_device_id to the default band so
+            // auto-split slices inherit it and the scanner stays on one device.
+            if (!cfg.device.required_device_id.empty()) {
+                b.device_id       = cfg.device.required_device_id;
+                b.device_required = true;
+            }
             effective_bands.push_back(b);
         }
 
         // Step 2: query SdrRM for online device count, then split bands to match.
+        // Skip auto-split when every effective band has a hard device requirement:
+        // splitting would create multiple slices all needing the same device, which
+        // on shared-LO hardware (e.g. G39DDC) would just cause sequential retries.
         // One temporary IqSource is created just for the HEALTH_QUERY — it uses
         // the persistent AMQP channel so the cost is a single ~16 ms round trip.
         {
@@ -186,7 +195,11 @@ int main(int argc, char* argv[]) {
             const int n_dev = probe->queryDeviceCount();
             probe.reset();
 
-            if (n_dev > static_cast<int>(effective_bands.size())) {
+            const bool all_required = !effective_bands.empty() &&
+                std::all_of(effective_bands.begin(), effective_bands.end(),
+                            [](const acq::BandConfig& b){ return b.device_required; });
+
+            if (!all_required && n_dev > static_cast<int>(effective_bands.size())) {
                 // More devices than bands — subdivide each band into equal slices.
                 // Distribute remainder to the first bands so all devices are used.
                 //   1 band  + 4 devices → [slice0, slice1, slice2, slice3]

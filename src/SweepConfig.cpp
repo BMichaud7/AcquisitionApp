@@ -171,6 +171,8 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         cfg.device.sample_rate = au::hertz(sr_raw);
     }
     if (auto* el = opt(dev, "rx_gain_db"))     el->QueryDoubleText(&cfg.device.rx_gain_db);
+    if (auto* el = opt(dev, "required_device_id"))
+        cfg.device.required_device_id = textOrDefault(el);
     if (auto* el = opt(dev, "bandwidth_hz")) {
         double bw_raw = 0.0;
         el->QueryDoubleText(&bw_raw);

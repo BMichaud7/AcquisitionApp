@@ -57,6 +57,10 @@ struct DeviceConfig {
     au::QuantityD<au::Hertz> sample_rate{au::hertz(10e6)};    ///< Sample rate (samples/s).
     double rx_gain_db{40.0};     ///< RX gain (dB).
     au::QuantityD<au::Hertz> bandwidth_hz{au::hertz(10e6)};   ///< Requested RF bandwidth per channel.
+    /// When non-empty: hard-pin all tasks from this scanner to this device and
+    /// suppress auto-split (both slices would need the same device anyway on
+    /// shared-LO hardware, so splitting just causes sequential retries).
+    std::string required_device_id;
 };
 
 /**
