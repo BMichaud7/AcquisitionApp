@@ -49,6 +49,7 @@ void AmqpPublisher::stop() {
             // forever.
             container_->stop();
         if (thread_.joinable()) thread_.join();
+        work_queue_.store(nullptr);
         delete container_;
         container_ = nullptr;
     }
