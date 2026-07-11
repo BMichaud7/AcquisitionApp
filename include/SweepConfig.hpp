@@ -155,6 +155,7 @@ struct P25Config {
  */
 struct BandConfig {
     std::string device_id;                              ///< Empty = SdrRM assigns next available.
+    bool        device_required{false};                 ///< When true, device_id is a hard constraint.
     au::QuantityD<au::Hertz> start_hz{au::hertz(0.0)}; ///< Band start frequency.
     au::QuantityD<au::Hertz> stop_hz{au::hertz(0.0)};  ///< Band stop frequency.
 };

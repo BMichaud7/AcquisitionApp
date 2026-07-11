@@ -69,11 +69,14 @@ public:
     /**
      * @brief Construct and connect the persistent AMQP channel.
      * @param cfg              Sweep configuration (AMQP URL, credentials, scan params, etc.).
-     * @param preferred_device Device ID to request from the controller (empty = any free device).
+     * @param preferred_device Device ID hint (empty = any free device).
+     * @param device_required  When true, preferred_device is sent as required_device and the
+     *                         controller rejects the task rather than falling back to another device.
      * @throws std::runtime_error if the AMQP channel fails to connect within 60 s.
      */
     explicit TaskManagerIqSource(const SweepConfig& cfg,
-                                  std::string preferred_device = "");
+                                  std::string preferred_device = "",
+                                  bool device_required = false);
     ~TaskManagerIqSource() override;
 
     /**
@@ -112,6 +115,7 @@ public:
 private:
     SweepConfig       cfg_;
     std::string       preferred_device_;        ///< Requested device ID; empty = any free device.
+    bool              device_required_{false};  ///< When true, send as required_device (hard constraint).
     int               udp_fd_{-1};              ///< UDP receive socket file descriptor.
     std::string       task_id_;                 ///< Controller-assigned task UUID for TASK_STOP.
     std::atomic<bool> running_{false};          ///< Set false by stop() to break the next() loop.

@@ -203,7 +203,8 @@ int main(int argc, char* argv[]) {
                     const double step   = (hi - lo) / pieces;
                     for (int j = 0; j < pieces; ++j) {
                         acq::BandConfig bc;
-                        bc.device_id = effective_bands[i].device_id;
+                        bc.device_id       = effective_bands[i].device_id;
+                        bc.device_required = effective_bands[i].device_required;
                         bc.start_hz  = au::hertz(lo + j       * step);
                         bc.stop_hz   = au::hertz(lo + (j + 1) * step);
                         split.push_back(bc);
@@ -222,11 +223,13 @@ int main(int argc, char* argv[]) {
             bcfg.sweep.start_hz = band.start_hz;
             bcfg.sweep.stop_hz  = band.stop_hz;
             bcfg.bands.clear();
-            spdlog::info("  {:.3f}–{:.3f} MHz  device={}",
+            spdlog::info("  {:.3f}–{:.3f} MHz  device={} {}",
                 band.start_hz.in(au::hertz) / 1e6,
                 band.stop_hz.in(au::hertz)  / 1e6,
-                band.device_id.empty() ? "any" : band.device_id);
-            sources.push_back(std::make_unique<acq::TaskManagerIqSource>(bcfg, band.device_id));
+                band.device_id.empty() ? "any" : band.device_id,
+                band.device_required ? "(required)" : "");
+            sources.push_back(std::make_unique<acq::TaskManagerIqSource>(
+                bcfg, band.device_id, band.device_required));
             scanners.push_back(std::make_unique<acq::SpectrumScanner>(bcfg, sources.back().get(), on_detection));
         }
     }

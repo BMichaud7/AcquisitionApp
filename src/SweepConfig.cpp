@@ -73,6 +73,11 @@ SweepConfig SweepConfig::from_file(const std::string& path) {
         for (auto* b = bands_el->FirstChildElement("band"); b; b = b->NextSiblingElement("band")) {
             BandConfig bc;
             bc.device_id = textOrDefault(opt(b, "device"));
+            // <required_device> overrides <device> and marks the device as mandatory
+            if (auto* el = opt(b, "required_device")) {
+                bc.device_id       = textOrDefault(el);
+                bc.device_required = true;
+            }
             uint64_t raw = 0;
             if (auto* e = opt(b, "start_hz")) { e->QueryUnsigned64Text(&raw); bc.start_hz = au::hertz(static_cast<double>(raw)); raw = 0; }
             if (auto* e = opt(b, "stop_hz"))  { e->QueryUnsigned64Text(&raw); bc.stop_hz  = au::hertz(static_cast<double>(raw)); }
@@ -246,7 +251,8 @@ std::vector<BandConfig> SweepConfig::splitBands(const std::vector<BandConfig>& b
         const double step   = (hi - lo) / pieces;
         for (int j = 0; j < pieces; ++j) {
             BandConfig bc;
-            bc.device_id = bands[i].device_id;
+            bc.device_id       = bands[i].device_id;
+            bc.device_required = bands[i].device_required;
             bc.start_hz  = au::hertz(lo + j       * step);
             bc.stop_hz   = au::hertz(lo + (j + 1) * step);
             out.push_back(bc);

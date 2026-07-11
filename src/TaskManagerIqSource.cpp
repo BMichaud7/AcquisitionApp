@@ -244,8 +244,10 @@ static std::string makeReqId() {
 // ── TaskManagerIqSource ───────────────────────────────────────────────────────
 
 TaskManagerIqSource::TaskManagerIqSource(const SweepConfig& cfg,
-                                          std::string preferred_device)
+                                          std::string preferred_device,
+                                          bool device_required)
     : cfg_(cfg), preferred_device_(std::move(preferred_device)),
+      device_required_(device_required),
       resume_hz_(cfg.sweep.start_hz) {
     pkt_buf_.resize(65536);
     resetAccum();
@@ -356,7 +358,7 @@ std::string TaskManagerIqSource::buildScanRequest(const std::string& req_id) con
             {"sample_rate_sps",   sr_hz},
             {"rx_count",          cfg_.device.rx_channels},
             {"rx_gain_db",        gains},
-            {"preferred_device",  preferred_device_}
+            {device_required_ ? "required_device" : "preferred_device", preferred_device_}
         }},
         {"streaming", streaming_obj},
         {"scan_params", {
