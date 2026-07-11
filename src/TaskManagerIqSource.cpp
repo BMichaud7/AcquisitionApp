@@ -100,6 +100,7 @@ public:
                 // and thread_.join() below blocks forever.
                 container_->stop();
             if (thread_.joinable()) thread_.join();
+            wq_.store(nullptr);
             container_.reset();
         }
     }
