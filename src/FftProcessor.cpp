@@ -240,6 +240,8 @@ std::vector<FftProcessor::Signal> FftProcessor::detectFromSpectrum(
     }
     flush(end_bin);
 
+    std::sort(signals.begin(), signals.end(),
+              [](const Signal& a, const Signal& b){ return a.peak_db > b.peak_db; });
     return signals;
 }
 
