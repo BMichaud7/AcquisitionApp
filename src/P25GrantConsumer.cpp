@@ -29,7 +29,15 @@ public:
 
     void on_container_start(proton::container& c) override {
         proton::connection_options copts;
-        if (!owner_.user_.empty()) copts.user(owner_.user_);
+        // Without sasl_allowed_mechs("PLAIN"), proton negotiates ANONYMOUS
+        // even when user/password are set — Artemis rejects (AMQ229031).
+        if (!owner_.user_.empty()) {
+            copts.sasl_allowed_mechs("PLAIN");
+            copts.sasl_allow_insecure_mechs(true);
+            copts.user(owner_.user_);
+        } else {
+            copts.sasl_allowed_mechs("ANONYMOUS");
+        }
         if (!owner_.pass_.empty()) copts.password(owner_.pass_);
         // Without this, a failed initial connection (Artemis not up yet) is
         // permanent -- P25 channel grants would silently never be received,
